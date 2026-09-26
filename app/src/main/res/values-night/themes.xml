@@ -1,9 +1,4 @@
 <resources>
-    <!--
-        Material 3 Expressive 風のカラースキーム。
-        深いインディゴ×バイオレットを軸に、暖色のアンバーをアクセントとして差し込む。
-        （Material のデフォルト紫 #6750A4 は使わず、独自のトーンにしている）
-    -->
     <style name="AppTheme" parent="Theme.Material3.DayNight.NoActionBar">
         <item name="colorPrimary">@color/md_primary</item>
         <item name="colorOnPrimary">@color/md_on_primary</item>
@@ -29,6 +24,6 @@
         <item name="colorOutline">@color/md_outline</item>
 
         <item name="android:statusBarColor">@color/md_background</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>

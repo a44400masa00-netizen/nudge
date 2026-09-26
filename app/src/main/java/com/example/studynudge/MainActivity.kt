@@ -2,6 +2,9 @@ package com.example.studynudge
 
 import android.Manifest
 import android.content.Intent
+import android.content.res.ColorStateList
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -10,24 +13,30 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.ViewGroup
-import android.widget.ArrayAdapter
-import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.Spinner
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.widget.ImageViewCompat
 import com.example.studynudge.reminder.Engine as ReminderEngine
 import com.example.studynudge.voice.LocalModel
 import com.example.studynudge.voice.VoiceListenerService
 import com.example.studynudge.voice.VoicePrefs
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.materialswitch.MaterialSwitch
+import com.google.android.material.textfield.MaterialAutoCompleteTextView
+import com.google.android.material.textfield.TextInputEditText
+import com.google.android.material.textfield.TextInputLayout
+import com.google.android.material.R as MaterialR
 import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
@@ -42,25 +51,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var intervalEdit: EditText
     private lateinit var bedtimeEdit: EditText
     private lateinit var earlyEdit: EditText
-    private lateinit var toggleButton: Button
-    private val placeViews = HashMap<String, TextView>()
+    private lateinit var toggleSwitch: MaterialSwitch
+    private val placeRows = HashMap<String, TextView>()
     private val handler = Handler(Looper.getMainLooper())
 
     // --- しつこい通知（在宅学習） ---
-    private lateinit var reminderEnabledSwitch: Switch
+    private lateinit var reminderEnabledSwitch: MaterialSwitch
     private lateinit var reminderTargetView: TextView
     private lateinit var reminderStartEdit: EditText
     private lateinit var reminderEndEdit: EditText
     private lateinit var reminderStatusView: TextView
 
     // --- 音声アシスタント（デイリー機能） ---
-    private lateinit var voiceEnabledSwitch: Switch
+    private lateinit var voiceEnabledSwitch: MaterialSwitch
     private lateinit var voiceApiKeyEdit: EditText
     private lateinit var voiceModelEdit: EditText
-    private lateinit var voiceSpeakSwitch: Switch
-    private lateinit var voiceBrainSpinner: Spinner
-    private lateinit var voiceCallNameSpinner: Spinner
-    private lateinit var voiceToneSpinner: Spinner
+    private lateinit var voiceSpeakSwitch: MaterialSwitch
+    private lateinit var voiceBrainDropdown: MaterialAutoCompleteTextView
+    private lateinit var voiceCallNameDropdown: MaterialAutoCompleteTextView
+    private lateinit var voiceToneDropdown: MaterialAutoCompleteTextView
     private lateinit var voiceMusicAppEdit: EditText
     private lateinit var voiceSpotifyIdEdit: EditText
     private lateinit var voiceSpotifySecretEdit: EditText
@@ -91,60 +100,226 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    // ============================ 見た目まわりの小さな部品 ============================
+
     private fun dp(v: Float): Int =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
 
-    private fun label(t: String, size: Float = 16f, bold: Boolean = true): TextView {
-        val tv = TextView(this)
-        tv.text = t
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
-        if (bold) tv.setTypeface(tv.typeface, android.graphics.Typeface.BOLD)
-        tv.setPadding(0, dp(16f), 0, dp(4f))
-        return tv
+    private fun themeColor(attr: Int): Int {
+        val tv = TypedValue()
+        theme.resolveAttribute(attr, tv, true)
+        return tv.data
     }
 
-    private fun note(t: String): TextView {
-        val tv = TextView(this)
-        tv.text = t
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-        tv.setPadding(0, dp(2f), 0, dp(6f))
-        return tv
+    /** アイコンを、色付きの円の中に置いたバッジを作る（Material 3 の「アイコンコンテナ」） */
+    private fun iconBadge(iconRes: Int, bgAttr: Int, fgAttr: Int): FrameLayout {
+        val frame = FrameLayout(this)
+        val bg = GradientDrawable()
+        bg.shape = GradientDrawable.OVAL
+        bg.setColor(themeColor(bgAttr))
+        frame.background = bg
+        val iv = ImageView(this)
+        iv.setImageResource(iconRes)
+        ImageViewCompat.setImageTintList(iv, ColorStateList.valueOf(themeColor(fgAttr)))
+        val ivLp = FrameLayout.LayoutParams(dp(22f), dp(22f))
+        ivLp.gravity = Gravity.CENTER
+        frame.addView(iv, ivLp)
+        return frame
     }
 
-    private fun button(t: String, onClick: () -> Unit): Button {
+    /** 大きく角丸のカードを1枚作り、その中身を入れるための入れ物を返す */
+    private fun card(pageRoot: LinearLayout, iconRes: Int, badgeBg: Int, badgeFg: Int, title: String, subtitle: String? = null): LinearLayout {
+        val cv = MaterialCardView(this)
+        cv.radius = dp(24f).toFloat()
+        cv.cardElevation = 0f
+        cv.strokeWidth = 0
+        cv.setCardBackgroundColor(themeColor(MaterialR.attr.colorSurface))
+        val outerLp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        outerLp.topMargin = dp(16f)
+        pageRoot.addView(cv, outerLp)
+
+        val inner = LinearLayout(this)
+        inner.orientation = LinearLayout.VERTICAL
+        inner.setPadding(dp(20f), dp(20f), dp(20f), dp(18f))
+        cv.addView(inner)
+
+        val header = LinearLayout(this)
+        header.orientation = LinearLayout.HORIZONTAL
+        header.gravity = Gravity.CENTER_VERTICAL
+        header.addView(iconBadge(iconRes, badgeBg, badgeFg), LinearLayout.LayoutParams(dp(40f), dp(40f)))
+
+        val titleCol = LinearLayout(this)
+        titleCol.orientation = LinearLayout.VERTICAL
+        titleCol.setPadding(dp(14f), 0, 0, 0)
+        val titleTv = TextView(this)
+        titleTv.text = title
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+        titleTv.setTypeface(titleTv.typeface, Typeface.BOLD)
+        titleTv.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        titleCol.addView(titleTv)
+        if (subtitle != null) {
+            val subTv = TextView(this)
+            subTv.text = subtitle
+            subTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            subTv.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+            titleCol.addView(subTv)
+        }
+        header.addView(titleCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        inner.addView(header)
+
+        val content = LinearLayout(this)
+        content.orientation = LinearLayout.VERTICAL
+        content.setPadding(0, dp(14f), 0, 0)
+        inner.addView(content)
+        return content
+    }
+
+    /** ノート（小さな注意書き） */
+    private fun note(container: LinearLayout, text: String) {
+        val tv = TextView(this)
+        tv.text = text
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+        tv.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        tv.setPadding(dp(4f), dp(8f), dp(4f), dp(4f))
+        container.addView(tv)
+    }
+
+    /** タップできる領域を広く取った、見出し＋説明＋矢印の行 */
+    private fun actionRow(container: LinearLayout, title: String, subtitle: String? = null, showChevron: Boolean = true, onClick: (() -> Unit)? = null): LinearLayout {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.minimumHeight = dp(56f)
+        if (onClick != null) {
+            row.isClickable = true
+            row.isFocusable = true
+            val outValue = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, outValue, true)
+            row.setBackgroundResource(outValue.resourceId)
+            row.setOnClickListener { onClick() }
+        }
+        row.setPadding(dp(4f), dp(8f), dp(4f), dp(8f))
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val titleTv = TextView(this)
+        titleTv.text = title
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        titleTv.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        col.addView(titleTv)
+        if (subtitle != null) {
+            val subTv = TextView(this)
+            subTv.text = subtitle
+            subTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            subTv.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+            subTv.setPadding(0, dp(2f), 0, 0)
+            col.addView(subTv)
+        }
+        row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        if (showChevron) {
+            val chev = ImageView(this)
+            chev.setImageResource(R.drawable.ic_chevron_right)
+            ImageViewCompat.setImageTintList(chev, ColorStateList.valueOf(themeColor(MaterialR.attr.colorOnSurfaceVariant)))
+            row.addView(chev, LinearLayout.LayoutParams(dp(22f), dp(22f)))
+        }
+        container.addView(row)
+        return row
+    }
+
+    /** 見出し＋説明＋右端に揃えたスイッチの行 */
+    private fun switchRow(container: LinearLayout, title: String, subtitle: String? = null, initial: Boolean): MaterialSwitch {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.minimumHeight = dp(56f)
+        row.setPadding(dp(4f), dp(8f), dp(4f), dp(8f))
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        val titleTv = TextView(this)
+        titleTv.text = title
+        titleTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        titleTv.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        col.addView(titleTv)
+        if (subtitle != null) {
+            val subTv = TextView(this)
+            subTv.text = subtitle
+            subTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12.5f)
+            subTv.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+            subTv.setPadding(0, dp(2f), 0, 0)
+            col.addView(subTv)
+        }
+        row.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val sw = MaterialSwitch(this)
+        sw.isChecked = initial
+        row.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        container.addView(row)
+        return sw
+    }
+
+    /** 角丸の、輪郭線タイプの入力欄 */
+    private fun textField(container: LinearLayout, label: String, value: String, numeric: Boolean = false): EditText {
+        val til = TextInputLayout(this)
+        til.boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+        til.setBoxCornerRadii(dp(16f).toFloat(), dp(16f).toFloat(), dp(16f).toFloat(), dp(16f).toFloat())
+        til.hint = label
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(10f)
+        val edit = TextInputEditText(til.context)
+        edit.setText(value)
+        edit.inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT
+        til.addView(edit)
+        container.addView(til, lp)
+        return edit
+    }
+
+    /** 角丸の、選ぶだけのドロップダウン欄（Material 3 の Exposed Dropdown Menu） */
+    private fun dropdownField(container: LinearLayout, label: String, options: List<Pair<String, String>>, current: String): MaterialAutoCompleteTextView {
+        val til = TextInputLayout(this)
+        til.boxBackgroundMode = TextInputLayout.BOX_BACKGROUND_OUTLINE
+        til.setBoxCornerRadii(dp(16f).toFloat(), dp(16f).toFloat(), dp(16f).toFloat(), dp(16f).toFloat())
+        til.hint = label
+        til.endIconMode = TextInputLayout.END_ICON_DROPDOWN_MENU
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(10f)
+        val actv = MaterialAutoCompleteTextView(til.context)
+        actv.inputType = InputType.TYPE_NULL
+        actv.keyListener = null
+        actv.setSimpleItems(options.map { it.second }.toTypedArray())
+        val idx = options.indexOfFirst { it.first == current }
+        if (idx >= 0) actv.setText(options[idx].second, false)
+        til.addView(actv)
+        container.addView(til, lp)
+        return actv
+    }
+
+    private fun dropdownValue(actv: MaterialAutoCompleteTextView, options: List<Pair<String, String>>): String =
+        options.firstOrNull { it.second == actv.text.toString() }?.first ?: options[0].first
+
+    /** 角丸で、横幅いっぱいの塗りつぶしボタン */
+    private fun filledButton(container: LinearLayout, text: String, onClick: () -> Unit): MaterialButton {
         val b = MaterialButton(this)
-        b.text = t
+        b.text = text
+        b.cornerRadius = dp(20f)
+        b.setOnClickListener { onClick() }
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48f))
+        lp.topMargin = dp(12f)
+        container.addView(b, lp)
+        return b
+    }
+
+    /** 角丸の、控えめな（アウトライン）ボタン。横並びで使う */
+    private fun outlinedButton(container: LinearLayout, text: String, onClick: () -> Unit): MaterialButton {
+        val b = MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle)
+        b.text = text
+        b.cornerRadius = dp(20f)
         b.setOnClickListener { onClick() }
         return b
     }
 
-    private fun edit(hintText: String, value: String, numeric: Boolean): EditText {
-        val e = EditText(this)
-        e.hint = hintText
-        e.inputType = if (numeric) InputType.TYPE_CLASS_NUMBER else InputType.TYPE_CLASS_TEXT
-        e.setText(value)
-        return e
-    }
-
-    private fun switchRow(text: String, initial: Boolean): Switch {
-        val s = Switch(this)
-        s.text = text
-        s.isChecked = initial
-        return s
-    }
-
-    private fun spinnerFor(options: List<Pair<String, String>>, current: String): Spinner {
-        val sp = Spinner(this)
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, options.map { it.second })
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        sp.adapter = adapter
-        val idx = options.indexOfFirst { it.first == current }
-        if (idx >= 0) sp.setSelection(idx)
-        return sp
-    }
-
-    private fun spinnerValue(spinner: Spinner, options: List<Pair<String, String>>): String =
-        options.getOrNull(spinner.selectedItemPosition)?.first ?: options[0].first
+    // ================================ 画面の組み立て ================================
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -154,31 +329,41 @@ class MainActivity : AppCompatActivity() {
         com.example.studynudge.reminder.NotificationHelper.createChannels(this)
 
         val scroll = ScrollView(this)
+        scroll.setBackgroundColor(themeColor(android.R.attr.colorBackground))
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(16f), dp(40f), dp(16f), dp(40f))
+        root.setPadding(dp(16f), dp(44f), dp(16f), dp(40f))
         scroll.addView(root)
         setContentView(scroll)
 
-        root.addView(label(getString(R.string.app_name), 24f))
-        statusView = TextView(this)
-        root.addView(statusView)
+        val appTitle = TextView(this)
+        appTitle.text = getString(R.string.app_name)
+        appTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 28f)
+        appTitle.setTypeface(appTitle.typeface, Typeface.BOLD)
+        appTitle.setTextColor(themeColor(MaterialR.attr.colorOnBackground))
+        root.addView(appTitle)
 
-        // --- 権限 ---
-        root.addView(label("① 権限の設定"))
-        root.addView(button("他のアプリの上に表示を許可") {
-            startActivity(
-                Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
-            )
-        })
-        root.addView(button("使用状況へのアクセスを許可") {
+        // --- 状態 ---
+        val statusContent = card(root, R.drawable.ic_check_circle, MaterialR.attr.colorSecondaryContainer, MaterialR.attr.colorOnSecondaryContainer, "状態")
+        statusView = TextView(this)
+        statusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+        statusView.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        statusView.setLineSpacing(dp(4f).toFloat(), 1f)
+        statusContent.addView(statusView)
+
+        // --- ① 権限 ---
+        val permContent = card(root, R.drawable.ic_lock, MaterialR.attr.colorPrimaryContainer, MaterialR.attr.colorOnPrimaryContainer, "権限", "順番に許可していってください")
+        actionRow(permContent, "他のアプリの上に表示") {
+            startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+        }
+        actionRow(permContent, "使用状況へのアクセス") {
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-        })
-        root.addView(button("位置情報・カレンダー・マイク・通知を許可") { requestRuntimePerms() })
-        root.addView(button("通知へのアクセスを許可（音楽操作・ハンズフリー起動用）") {
+        }
+        actionRow(permContent, "位置情報・カレンダー・マイク・通知", "まとめて許可") { requestRuntimePerms() }
+        actionRow(permContent, "通知へのアクセス", "音楽操作・ハンズフリー起動用") {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        })
-        root.addView(button("正確なアラームを許可（端末により表示されないことがあります）") {
+        }
+        actionRow(permContent, "正確なアラーム", "端末により表示されないことがあります") {
             if (Build.VERSION.SDK_INT >= 31) {
                 try {
                     startActivity(Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
@@ -188,182 +373,154 @@ class MainActivity : AppCompatActivity() {
             } else {
                 Toast.makeText(this, "この端末では追加の許可は不要です", Toast.LENGTH_SHORT).show()
             }
-        })
-        root.addView(button("電池の最適化の設定を開く（強く推奨）") {
+        }
+        actionRow(permContent, "電池の最適化から除外", "強く推奨") {
             startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        })
-        root.addView(button("画面の明るさ操作を許可（音声アシスタント用・任意）") {
+        }
+        actionRow(permContent, "画面の明るさ操作", "音声アシスタント用・任意") {
             startActivity(Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:$packageName")))
-        })
-        root.addView(button("おやすみモードの操作を許可（音声アシスタント用・任意）") {
+        }
+        actionRow(permContent, "おやすみモードの操作", "音声アシスタント用・任意", showChevron = true) {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
-        })
-        root.addView(
-            note(
-                "※ APKを直接インストールした場合、許可の画面が押せないことがあります。その時は" +
-                    "「設定 > アプリ > ${getString(R.string.app_name)} > 右上の︙ > 制限付き設定を許可」を先に行ってください。"
-            )
-        )
+        }
+        note(permContent, "APKを直接インストールした場合、上のボタンが反応しないことがあります。その時は「設定 > アプリ > ${getString(R.string.app_name)} > 右上の︙ > 制限付き設定を許可」を先に行ってください。")
 
-        // --- AI ---
-        root.addView(label("② AI（Gemini）の設定　※勉強の声かけ用"))
-        apiKeyEdit = edit("Gemini APIキー", prefs.apiKey, false)
-        root.addView(apiKeyEdit)
-        modelEdit = edit("モデル名", prefs.model, false)
-        root.addView(modelEdit)
+        // --- ② 勉強の声かけ ---
+        val nudgeContent = card(root, R.drawable.ic_sparkle, MaterialR.attr.colorTertiaryContainer, MaterialR.attr.colorOnTertiaryContainer, "勉強の声かけ", "AI（Gemini）が状況を見て声をかけます")
+        apiKeyEdit = textField(nudgeContent, "Gemini APIキー", prefs.apiKey)
+        modelEdit = textField(nudgeContent, "モデル名", prefs.model)
+        intervalEdit = textField(nudgeContent, "声かけの間隔（分）", prefs.intervalMin.toString(), numeric = true)
+        bedtimeEdit = textField(nudgeContent, "就寝時刻（時, 0〜23）", prefs.bedtimeHour.toString(), numeric = true)
+        earlyEdit = textField(nudgeContent, "早朝の基準（時, 0〜23）", prefs.earlyHour.toString(), numeric = true)
+        note(nudgeContent, "就寝時刻を過ぎての使用には「夜更かしですか」、早朝の基準より前に使い始めると「おはようございます」というメッセージになります。")
+        filledButton(nudgeContent, "この設定を保存") { saveSettings() }
 
-        // --- 場所 ---
-        root.addView(label("③ 場所の登録（地図をタップしてピンを置く）"))
+        // --- ③ 登録した場所 ---
+        val placesContent = card(root, R.drawable.ic_pin, MaterialR.attr.colorSecondaryContainer, MaterialR.attr.colorOnSecondaryContainer, "登録した場所", "タップして地図でピンを置く")
         for ((key, name) in PlaceKeys.ALL) {
-            val row = LinearLayout(this)
-            row.orientation = LinearLayout.HORIZONTAL
-            val tv = TextView(this)
-            placeViews[key] = tv
-            row.addView(tv, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(button("地図で設定") {
+            val row = actionRow(placesContent, name, "未設定", showChevron = false) {
                 val i = Intent(this, MapPickerActivity::class.java)
                 i.putExtra("key", key)
                 i.putExtra("label", name)
                 startActivity(i)
-            })
-            row.addView(button("消去") {
+            }
+            val subTv = (row.getChildAt(0) as LinearLayout).getChildAt(1) as TextView
+            placeRows[key] = subTv
+            val delBtn = outlinedButton(row, "消去") {
                 prefs.clearPlace(key)
                 refresh()
-            })
-            root.addView(row)
+            }
+            row.addView(delBtn)
         }
 
-        // --- 動作設定 ---
-        root.addView(label("④ 動作の設定　※勉強の声かけ用"))
-        root.addView(TextView(this).apply { text = "通常の声かけ間隔（分）" })
-        intervalEdit = edit("通常の声かけ間隔（分）", prefs.intervalMin.toString(), true)
-        root.addView(intervalEdit)
-        root.addView(TextView(this).apply { text = "就寝時刻（この時刻以降の使用で「夜更かし」メッセージ, 0-23）" })
-        bedtimeEdit = edit("就寝時刻（時, 0-23）", prefs.bedtimeHour.toString(), true)
-        root.addView(bedtimeEdit)
-        root.addView(TextView(this).apply { text = "早朝の基準（この時刻より前に使い始めると「おはようございます」メッセージ）" })
-        earlyEdit = edit("早朝の基準（時, 0-23）", prefs.earlyHour.toString(), true)
-        root.addView(earlyEdit)
-        root.addView(button("設定を保存") { saveSettings() })
+        // --- ④ 見守りの実行 ---
+        val runContent = card(root, R.drawable.ic_sparkle, MaterialR.attr.colorPrimaryContainer, MaterialR.attr.colorOnPrimaryContainer, "見守りの実行", "②の声かけと⑤のしつこい通知がまとめて動きます")
+        toggleSwitch = switchRow(runContent, "見守りを開始する", initial = NudgeService.running)
+        toggleSwitch.setOnCheckedChangeListener { _, isChecked -> onWatchSwitchChanged(isChecked) }
+        filledButton(runContent, "今すぐテスト表示") { testNow() }
 
-        // --- 実行 ---
-        root.addView(label("⑤ 見守りの実行"))
-        toggleButton = button("見守りを開始") { toggleService() }
-        root.addView(toggleButton)
-        root.addView(button("今すぐテスト表示") { testNow() })
-        root.addView(
-            note("「見守り」を開始すると、④の声かけと、⑥のしつこい通知の両方がまとめて動きます。")
-        )
-
-        // --- ⑥ しつこい通知（在宅学習） ---
-        root.addView(label("⑥ しつこい通知（在宅学習）"))
-        root.addView(
-            note(
-                "設定した時間帯に「自宅」（③で登録した地図ピン）にいると声をかけ、" +
-                    "対象アプリを開くまで数分おきに催促します。在宅の判定は③の「自宅」ピンを使うので、" +
-                    "別途Wi-Fiの登録は不要です。"
-            )
-        )
-        reminderEnabledSwitch = switchRow("しつこい通知を有効にする", reminderPrefs.enabled)
-        root.addView(reminderEnabledSwitch)
-
-        val targetRow = LinearLayout(this)
-        targetRow.orientation = LinearLayout.HORIZONTAL
+        // --- ⑤ しつこい通知（在宅学習） ---
+        val reminderContent = card(root, R.drawable.ic_bell, MaterialR.attr.colorTertiaryContainer, MaterialR.attr.colorOnTertiaryContainer, "しつこい通知", "在宅学習の催促")
+        note(reminderContent, "設定した時間帯に「自宅」（③のピン）にいると声をかけ、対象アプリを開くまで数分おきに催促します。在宅の判定は③の「自宅」ピンを使います。")
+        reminderEnabledSwitch = switchRow(reminderContent, "しつこい通知を有効にする", initial = reminderPrefs.enabled)
         reminderTargetView = TextView(this)
-        targetRow.addView(reminderTargetView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        targetRow.addView(button("アプリを選ぶ") {
+        reminderTargetView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13.5f)
+        reminderTargetView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        reminderTargetView.setPadding(dp(4f), dp(4f), dp(4f), 0)
+        reminderContent.addView(reminderTargetView)
+        outlinedButton(reminderContent, "対象アプリを選ぶ") {
             appPickerLauncher.launch(Intent(this, AppPickerActivity::class.java))
-        })
-        root.addView(targetRow)
-
-        root.addView(TextView(this).apply { text = "開始時刻（時, 0-23）" })
-        reminderStartEdit = edit("開始時刻（時）", (reminderPrefs.windowStartMinutes / 60).toString(), true)
-        root.addView(reminderStartEdit)
-        root.addView(TextView(this).apply { text = "終了時刻（時, 0-23）" })
-        reminderEndEdit = edit("終了時刻（時）", (reminderPrefs.windowEndMinutes / 60).toString(), true)
-        root.addView(reminderEndEdit)
-        root.addView(button("この設定を保存") { saveReminderSettings() })
+        }.also {
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44f))
+            lp.topMargin = dp(6f)
+            reminderContent.addView(it, lp)
+        }
+        val timeRow = LinearLayout(this)
+        timeRow.orientation = LinearLayout.HORIZONTAL
+        timeRow.setPadding(0, dp(6f), 0, 0)
+        val startCol = LinearLayout(this)
+        startCol.orientation = LinearLayout.VERTICAL
+        reminderStartEdit = textField(startCol, "開始時刻（時）", (reminderPrefs.windowStartMinutes / 60).toString(), numeric = true)
+        timeRow.addView(startCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val spacer = android.view.View(this)
+        timeRow.addView(spacer, LinearLayout.LayoutParams(dp(12f), 0))
+        val endCol = LinearLayout(this)
+        endCol.orientation = LinearLayout.VERTICAL
+        reminderEndEdit = textField(endCol, "終了時刻（時）", (reminderPrefs.windowEndMinutes / 60).toString(), numeric = true)
+        timeRow.addView(endCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        reminderContent.addView(timeRow)
+        filledButton(reminderContent, "この設定を保存") { saveReminderSettings() }
         reminderStatusView = TextView(this)
-        root.addView(reminderStatusView)
-        root.addView(button("状態を確認する") { showReminderStatus() })
-        root.addView(
-            note(
-                "「今日はもう休む」を選んだ日は、その日はもう催促しません。" +
-                    "翌日、日付が変わると自動的にリセットされます。"
-            )
-        )
+        reminderStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        reminderStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        reminderStatusView.setPadding(dp(4f), dp(10f), dp(4f), 0)
+        reminderContent.addView(reminderStatusView)
+        outlinedButton(reminderContent, "状態を確認する") { showReminderStatus() }.also {
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44f))
+            lp.topMargin = dp(6f)
+            reminderContent.addView(it, lp)
+        }
+        note(reminderContent, "「今日はもう休む」を選んだ日は、その日はもう催促しません。日付が変わると自動的にリセットされます。")
 
-        // --- ⑦ 音声アシスタント（デイリー機能） ---
-        root.addView(label("⑦ 音声アシスタント（デイリー機能）"))
-        root.addView(
-            note(
-                "「ヘイ、デイリー」と呼びかけると起動する、常駐の音声アシスタントです。" +
-                    "タイマー・アラームはAndroid標準の時計アプリにセットします。" +
-                    "カレンダーへの予定追加（Googleカレンダーと同期）、メールの作成画面を開く、" +
-                    "Google Homeアプリを開く、ライト・音量などもハンズフリーで操作できます。" +
-                    "呼びかけの言葉（ヘイ、デイリー）は学習済みモデルに固定されており、アプリ名を変えても変更できません。" +
-                    "誤って反応することが多い場合は、下の説明にある THRESHOLD の値をさらに上げてください。"
-            )
+        // --- ⑥ 音声アシスタント ---
+        val voiceContent = card(root, R.drawable.ic_mic, MaterialR.attr.colorSecondaryContainer, MaterialR.attr.colorOnSecondaryContainer, "音声アシスタント", "「ヘイ、デイリー」で呼びかけ")
+        note(
+            voiceContent,
+            "タイマー・アラームはAndroid標準の時計アプリにセットします。カレンダーへの予定追加（Googleカレンダーと同期）、" +
+                "メールの作成画面を開く、Google Homeアプリを開く、ライト・音量などもハンズフリーで操作できます。" +
+                "呼びかけの言葉はモデルに固定されており、アプリ名を変えても変更できません。"
         )
-        voiceEnabledSwitch = switchRow("音声アシスタントを有効にする", VoiceListenerService.running)
+        voiceEnabledSwitch = switchRow(voiceContent, "音声アシスタントを有効にする", initial = VoiceListenerService.running)
         voiceEnabledSwitch.setOnCheckedChangeListener { _, isChecked -> onVoiceSwitchChanged(isChecked) }
-        root.addView(voiceEnabledSwitch)
 
-        voiceApiKeyEdit = edit("Gemini APIキー（空欄なら②と同じキーを使用）", voicePrefs.apiKey, false)
-        root.addView(voiceApiKeyEdit)
-        voiceModelEdit = edit("モデル名", voicePrefs.model, false)
-        root.addView(voiceModelEdit)
+        voiceApiKeyEdit = textField(voiceContent, "Gemini APIキー（空欄なら②と共通）", voicePrefs.apiKey)
+        voiceModelEdit = textField(voiceContent, "モデル名", voicePrefs.model)
+        voiceSpeakSwitch = switchRow(voiceContent, "声で読み上げる", initial = voicePrefs.speak)
+        voiceBrainDropdown = dropdownField(voiceContent, "頭脳の選び方", brainOptions, voicePrefs.brain)
+        voiceCallNameDropdown = dropdownField(voiceContent, "呼び方", callNameOptions, voicePrefs.callName)
+        voiceToneDropdown = dropdownField(voiceContent, "話し方", toneOptions, voicePrefs.tone)
+        voiceMusicAppEdit = textField(voiceContent, "音楽アプリ名（例: Spotify）", voicePrefs.musicApp)
+        note(voiceContent, "Spotifyを使う場合のみ、下2つを入力すると曲の再生精度が上がります（任意・Spotify for Developersで無料取得）")
+        voiceSpotifyIdEdit = textField(voiceContent, "Spotify Client ID（任意）", voicePrefs.spotifyClientId)
+        voiceSpotifySecretEdit = textField(voiceContent, "Spotify Client Secret（任意）", voicePrefs.spotifyClientSecret)
+        filledButton(voiceContent, "この設定を保存") { saveVoiceSettings() }
 
-        voiceSpeakSwitch = switchRow("声で読み上げる", voicePrefs.speak)
-        root.addView(voiceSpeakSwitch)
-
-        root.addView(TextView(this).apply { text = "頭脳の選び方" })
-        voiceBrainSpinner = spinnerFor(brainOptions, voicePrefs.brain)
-        root.addView(voiceBrainSpinner)
-
-        root.addView(TextView(this).apply { text = "呼び方" })
-        voiceCallNameSpinner = spinnerFor(callNameOptions, voicePrefs.callName)
-        root.addView(voiceCallNameSpinner)
-
-        root.addView(TextView(this).apply { text = "話し方" })
-        voiceToneSpinner = spinnerFor(toneOptions, voicePrefs.tone)
-        root.addView(voiceToneSpinner)
-
-        voiceMusicAppEdit = edit("音楽アプリ名（例: Spotify）", voicePrefs.musicApp, false)
-        root.addView(voiceMusicAppEdit)
-
-        root.addView(note("Spotifyを使う場合のみ、下2つを入力すると曲の再生精度が上がります（任意・Spotify for Developersで無料取得）"))
-        voiceSpotifyIdEdit = edit("Spotify Client ID（任意）", voicePrefs.spotifyClientId, false)
-        root.addView(voiceSpotifyIdEdit)
-        voiceSpotifySecretEdit = edit("Spotify Client Secret（任意）", voicePrefs.spotifyClientSecret, false)
-        root.addView(voiceSpotifySecretEdit)
-
-        root.addView(button("この設定を保存") { saveVoiceSettings() })
-
-        root.addView(label("端末内AI（オフラインモデル）", 14f))
+        val modelHeader = TextView(this)
+        modelHeader.text = "端末内AI（オフラインモデル）"
+        modelHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+        modelHeader.setTypeface(modelHeader.typeface, Typeface.BOLD)
+        modelHeader.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        modelHeader.setPadding(dp(4f), dp(18f), dp(4f), dp(2f))
+        voiceContent.addView(modelHeader)
         voiceModelStatusView = TextView(this)
-        root.addView(voiceModelStatusView)
+        voiceModelStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        voiceModelStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        voiceModelStatusView.setPadding(dp(4f), 0, dp(4f), 0)
+        voiceContent.addView(voiceModelStatusView)
         val modelRow = LinearLayout(this)
         modelRow.orientation = LinearLayout.HORIZONTAL
-        modelRow.addView(button("ダウンロード（Wi-Fi推奨・約2.1GB）") {
+        modelRow.setPadding(0, dp(8f), 0, 0)
+        val dlBtn = outlinedButton(modelRow, "ダウンロード（約2.1GB）") {
             LocalModel.start(this)
-            Toast.makeText(this, "通知バーでダウンロードの進み具合を確認できます", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "通知バーで進み具合を確認できます", Toast.LENGTH_LONG).show()
             handler.postDelayed({ refresh() }, 1500L)
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        modelRow.addView(button("削除") {
+        }
+        modelRow.addView(dlBtn, LinearLayout.LayoutParams(0, dp(44f), 1f))
+        val spacer2 = android.view.View(this)
+        modelRow.addView(spacer2, LinearLayout.LayoutParams(dp(10f), 0))
+        val delModelBtn = outlinedButton(modelRow, "削除") {
             LocalModel.deleteAll(this)
             refresh()
-        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        root.addView(modelRow)
-        root.addView(
-            note(
-                "この機能はビルドが失敗しやすい部分です。ビルドエラーになる場合は、app/build.gradle.kts の " +
-                    "dev.ffmpegkit-maintained:llama-android の行を削除して再ビルドしてください（クラウド版のみで動きます）。"
-            )
-        )
+        }
+        modelRow.addView(delModelBtn, LinearLayout.LayoutParams(0, dp(44f), 1f))
+        voiceContent.addView(modelRow)
+        note(voiceContent, "端末内AIはビルドが失敗しやすい部分です。エラーになる場合は build.gradle.kts の llama-android の行を削除して再ビルドしてください（クラウド版のみで動きます）。")
 
         voiceStatusView = TextView(this)
-        root.addView(voiceStatusView)
+        voiceStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        voiceStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        voiceStatusView.setPadding(dp(4f), dp(14f), dp(4f), 0)
+        voiceContent.addView(voiceStatusView)
     }
 
     override fun onResume() {
@@ -408,9 +565,9 @@ class MainActivity : AppCompatActivity() {
         val m = voiceModelEdit.text.toString().trim()
         if (m.isNotEmpty()) voicePrefs.model = m
         voicePrefs.speak = voiceSpeakSwitch.isChecked
-        voicePrefs.brain = spinnerValue(voiceBrainSpinner, brainOptions)
-        voicePrefs.callName = spinnerValue(voiceCallNameSpinner, callNameOptions)
-        voicePrefs.tone = spinnerValue(voiceToneSpinner, toneOptions)
+        voicePrefs.brain = dropdownValue(voiceBrainDropdown, brainOptions)
+        voicePrefs.callName = dropdownValue(voiceCallNameDropdown, callNameOptions)
+        voicePrefs.tone = dropdownValue(voiceToneDropdown, toneOptions)
         voicePrefs.musicApp = voiceMusicAppEdit.text.toString().trim()
         voicePrefs.spotifyClientId = voiceSpotifyIdEdit.text.toString().trim()
         voicePrefs.spotifyClientSecret = voiceSpotifySecretEdit.text.toString().trim()
@@ -430,16 +587,20 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun toggleService() {
+    private fun onWatchSwitchChanged(wantOn: Boolean) {
+        if (wantOn == NudgeService.running) return
         saveSettings()
         saveReminderSettings()
-        if (NudgeService.running) {
-            prefs.wasRunning = false
-            stopService(Intent(this, NudgeService::class.java))
-        } else {
-            if (!canStart()) return
+        if (wantOn) {
+            if (!canStart()) {
+                toggleSwitch.isChecked = false
+                return
+            }
             prefs.wasRunning = true
             ContextCompat.startForegroundService(this, Intent(this, NudgeService::class.java))
+        } else {
+            prefs.wasRunning = false
+            stopService(Intent(this, NudgeService::class.java))
         }
         handler.postDelayed({ refresh() }, 600L)
     }
@@ -520,28 +681,28 @@ class MainActivity : AppCompatActivity() {
         line(NudgeService.running, if (NudgeService.running) "見守り中" else "停止中")
         val err = prefs.lastError
         if (err.isNotEmpty()) sb.append("\n直近のエラー: ").append(err)
-        statusView.text = sb.toString()
+        statusView.text = sb.toString().trim()
 
         for ((key, name) in PlaceKeys.ALL) {
             val p = prefs.getPlace(key)
-            placeViews[key]?.text = if (p == null) {
-                "$name: 未設定"
+            placeRows[key]?.text = if (p == null) {
+                "未設定"
             } else {
-                String.format(Locale.US, "%s: %.4f, %.4f（半径%dm）", name, p.lat, p.lng, p.radius)
+                String.format(Locale.US, "%.4f, %.4f（半径%dm）", p.lat, p.lng, p.radius)
             }
         }
-        toggleButton.text = if (NudgeService.running) "見守りを停止" else "見守りを開始"
+        if (::toggleSwitch.isInitialized) toggleSwitch.isChecked = NudgeService.running
 
-        // ⑥ しつこい通知
+        // ⑤ しつこい通知
         val label = reminderPrefs.targetAppLabel
         reminderTargetView.text = "対象アプリ: ${label ?: "未設定"}"
         val rsb = StringBuilder()
         rsb.append(if (reminderPrefs.restedToday) "今日: 休み中\n" else "今日: 通常\n")
         rsb.append("警告レベル: ${reminderPrefs.warningCount}\n")
-        rsb.append(if (reminderPrefs.studying) "現在: 対象アプリを使用中\n" else "")
-        reminderStatusView.text = rsb.toString()
+        if (reminderPrefs.studying) rsb.append("現在: 対象アプリを使用中\n")
+        reminderStatusView.text = rsb.toString().trim()
 
-        // ⑦ 音声アシスタント
+        // ⑥ 音声アシスタント
         val ms = LocalModel.status(this)
         val state = ms["state"] as? String ?: "none"
         voiceModelStatusView.text = when (state) {
@@ -556,9 +717,9 @@ class MainActivity : AppCompatActivity() {
             else -> "状態: 未ダウンロード"
         }
         val vsb = StringBuilder()
-        vsb.append(if (VoiceListenerService.running) "音声アシスタント: 動作中\n" else "音声アシスタント: 停止中\n")
+        vsb.append(if (VoiceListenerService.running) "動作中\n" else "停止中\n")
         if (!Perm.hasMic(this)) vsb.append("※マイクの許可が必要です\n")
         if (!Perm.hasNotificationListener(this)) vsb.append("※音楽操作・ハンズフリー起動には「通知へのアクセス」が必要です\n")
-        voiceStatusView.text = vsb.toString()
+        voiceStatusView.text = vsb.toString().trim()
     }
 }

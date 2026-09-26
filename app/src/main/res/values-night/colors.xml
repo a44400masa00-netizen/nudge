@@ -1,0 +1,25 @@
+<resources>
+    <!-- Dark トーン -->
+    <color name="md_primary">#C7BFFF</color>
+    <color name="md_on_primary">#2D2270</color>
+    <color name="md_primary_container">#332874</color>
+    <color name="md_on_primary_container">#E3DFFF</color>
+
+    <color name="md_secondary">#C6C3DC</color>
+    <color name="md_on_secondary">#2F2D42</color>
+    <color name="md_secondary_container">#454259</color>
+    <color name="md_on_secondary_container">#E3DFF9</color>
+
+    <color name="md_tertiary">#FFB870</color>
+    <color name="md_on_tertiary">#4A2900</color>
+    <color name="md_tertiary_container">#6A3C00</color>
+    <color name="md_on_tertiary_container">#FFDDB3</color>
+
+    <color name="md_background">#141218</color>
+    <color name="md_on_background">#E6E1E9</color>
+    <color name="md_surface">#1E1C24</color>
+    <color name="md_on_surface">#E6E1E9</color>
+    <color name="md_surface_variant">#47464F</color>
+    <color name="md_on_surface_variant">#C9C5D0</color>
+    <color name="md_outline">#928F99</color>
+</resources>

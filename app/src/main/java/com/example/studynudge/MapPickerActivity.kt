@@ -101,6 +101,7 @@ class MapPickerActivity : AppCompatActivity() {
         row.setPadding(dp(8f), 0, dp(8f), dp(12f))
 
         val locBtn = MaterialButton(this)
+        locBtn.cornerRadius = dp(20f)
         locBtn.text = "現在地へ移動"
         locBtn.setOnClickListener {
             val g = lastKnown()
@@ -114,6 +115,7 @@ class MapPickerActivity : AppCompatActivity() {
         row.addView(locBtn, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         val saveBtn = MaterialButton(this)
+        saveBtn.cornerRadius = dp(20f)
         saveBtn.text = "この場所で保存"
         saveBtn.setOnClickListener {
             val p = picked
