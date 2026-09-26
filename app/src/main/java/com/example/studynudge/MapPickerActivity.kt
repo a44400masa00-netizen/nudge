@@ -12,25 +12,27 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.GoogleMap
-import com.google.android.gms.maps.MapView
-import com.google.android.gms.maps.model.Circle
-import com.google.android.gms.maps.model.CircleOptions
-import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.Marker
-import com.google.android.gms.maps.model.MarkerOptions
 import com.google.android.material.button.MaterialButton
+import org.osmdroid.config.Configuration
+import org.osmdroid.events.MapEventsReceiver
+import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.MapEventsOverlay
+import org.osmdroid.views.overlay.Marker
+import org.osmdroid.views.overlay.Polygon
+import java.io.File
 import java.util.Locale
+import kotlin.math.cos
+import kotlin.math.sin
 
 class MapPickerActivity : AppCompatActivity() {
-    private lateinit var mapView: MapView
+    private lateinit var map: MapView
     private lateinit var infoView: TextView
     private lateinit var radiusView: TextView
-    private var gmap: GoogleMap? = null
-    private var pin: Marker? = null
-    private var circle: Circle? = null
-    private var picked: LatLng? = null
+    private var marker: Marker? = null
+    private var circle: Polygon? = null
+    private var picked: GeoPoint? = null
     private var radius = 150
     private var placeLabel = ""
 
@@ -39,6 +41,12 @@ class MapPickerActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val conf = Configuration.getInstance()
+        conf.load(applicationContext, getSharedPreferences("osmdroid", Context.MODE_PRIVATE))
+        conf.userAgentValue = packageName
+        conf.osmdroidBasePath = File(cacheDir, "osmdroid")
+        conf.osmdroidTileCache = File(cacheDir, "osmdroid/tiles")
 
         val key = intent.getStringExtra("key") ?: "home"
         placeLabel = intent.getStringExtra("label") ?: key
@@ -50,12 +58,21 @@ class MapPickerActivity : AppCompatActivity() {
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(0, dp(28f), 0, 0)
 
-        mapView = MapView(this)
-        root.addView(mapView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        map = MapView(this)
+        // 国土地理院の地図タイルを使用（OpenStreetMapの無料サーバーはアプリからのアクセスを
+        // ブロックすることがあるため。日本国内向け・APIキー不要・無料）
+        map.setTileSource(
+            XYTileSource(
+                "GSI", 5, 18, 256, ".png",
+                arrayOf("https://cyberjapandata.gsi.go.jp/xyz/std/")
+            )
+        )
+        map.setMultiTouchControls(true)
+        root.addView(map, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         infoView = TextView(this)
         infoView.text = "「${placeLabel}」の場所を、地図をタップして指定してください"
-        infoView.setPadding(dp(16f), dp(8f), dp(16f), dp(0f))
+        infoView.setPadding(dp(16f), dp(8f), dp(16f), 0)
         root.addView(infoView)
 
         radiusView = TextView(this)
@@ -71,7 +88,7 @@ class MapPickerActivity : AppCompatActivity() {
             override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                 radius = progress + 50
                 radiusView.text = "この場所とみなす半径: ${radius} m"
-                circle?.radius = radius.toDouble()
+                picked?.let { drawCircle(it) }
             }
 
             override fun onStartTrackingTouch(sb: SeekBar?) {}
@@ -87,9 +104,9 @@ class MapPickerActivity : AppCompatActivity() {
         locBtn.text = "現在地へ移動"
         locBtn.setOnClickListener {
             val g = lastKnown()
-            val m = gmap
-            if (g != null && m != null) {
-                m.animateCamera(CameraUpdateFactory.newLatLngZoom(g, 17f))
+            if (g != null) {
+                map.controller.setZoom(17.0)
+                map.controller.setCenter(g)
             } else {
                 Toast.makeText(this, "現在地を取得できません", Toast.LENGTH_SHORT).show()
             }
@@ -113,52 +130,78 @@ class MapPickerActivity : AppCompatActivity() {
 
         setContentView(root)
 
-        mapView.onCreate(savedInstanceState)
-        mapView.getMapAsync { g ->
-            gmap = g
-            g.uiSettings.isZoomControlsEnabled = true
-            g.setOnMapClickListener { setPin(it) }
-            g.setOnMapLongClickListener { setPin(it) }
-            if (Perm.hasLocation(this)) {
-                try {
-                    g.isMyLocationEnabled = true
-                } catch (e: SecurityException) {
-                }
+        val receiver = object : MapEventsReceiver {
+            override fun singleTapConfirmedHelper(p: GeoPoint?): Boolean {
+                if (p != null) setPin(p)
+                return true
             }
-            if (existing != null) {
-                val ll = LatLng(existing.lat, existing.lng)
-                g.moveCamera(CameraUpdateFactory.newLatLngZoom(ll, 17f))
-                setPin(ll)
+
+            override fun longPressHelper(p: GeoPoint?): Boolean {
+                if (p != null) setPin(p)
+                return true
+            }
+        }
+        map.overlays.add(MapEventsOverlay(receiver))
+
+        if (existing != null) {
+            val g = GeoPoint(existing.lat, existing.lng)
+            map.controller.setZoom(17.0)
+            map.controller.setCenter(g)
+            setPin(g)
+        } else {
+            val g = lastKnown()
+            if (g != null) {
+                map.controller.setZoom(16.0)
+                map.controller.setCenter(g)
             } else {
-                val ll = lastKnown()
-                if (ll != null) {
-                    g.moveCamera(CameraUpdateFactory.newLatLngZoom(ll, 16f))
-                } else {
-                    g.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(35.6812, 139.7671), 11f))
-                }
+                map.controller.setZoom(11.0)
+                map.controller.setCenter(GeoPoint(35.6812, 139.7671))
             }
         }
     }
 
-    private fun setPin(p: LatLng) {
-        val g = gmap ?: return
-        pin?.remove()
-        circle?.remove()
-        pin = g.addMarker(MarkerOptions().position(p).title(placeLabel))
-        circle = g.addCircle(
-            CircleOptions()
-                .center(p)
-                .radius(radius.toDouble())
-                .strokeColor(Color.parseColor("#3F51B5"))
-                .strokeWidth(3f)
-                .fillColor(Color.parseColor("#223F51B5"))
-        )
+    private fun setPin(p: GeoPoint) {
+        marker?.let { map.overlays.remove(it) }
+        val m = Marker(map)
+        m.position = p
+        m.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+        m.title = placeLabel
+        map.overlays.add(m)
+        marker = m
         picked = p
+        drawCircle(p)
         infoView.text = String.format(Locale.US, "%s: %.5f, %.5f", placeLabel, p.latitude, p.longitude)
     }
 
+    /** 円が描けないosmdroidの標準機能の代わりに、多角形で円を近似して描く */
+    private fun drawCircle(center: GeoPoint) {
+        circle?.let { map.overlays.remove(it) }
+        val points = ArrayList<GeoPoint>()
+        val earthRadius = 6371000.0
+        val latRad = Math.toRadians(center.latitude)
+        for (i in 0..64) {
+            val angle = 2.0 * Math.PI * i / 64
+            val dLat = (radius * cos(angle)) / earthRadius
+            val dLng = (radius * sin(angle)) / (earthRadius * cos(latRad))
+            points.add(
+                GeoPoint(
+                    center.latitude + Math.toDegrees(dLat),
+                    center.longitude + Math.toDegrees(dLng)
+                )
+            )
+        }
+        val poly = Polygon()
+        poly.points = points
+        poly.fillColor = Color.parseColor("#223F51B5")
+        poly.strokeColor = Color.parseColor("#3F51B5")
+        poly.strokeWidth = 3f
+        map.overlays.add(poly)
+        circle = poly
+        map.invalidate()
+    }
+
     @SuppressLint("MissingPermission")
-    private fun lastKnown(): LatLng? {
+    private fun lastKnown(): GeoPoint? {
         if (!Perm.hasLocation(this)) return null
         return try {
             val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -167,44 +210,19 @@ class MapPickerActivity : AppCompatActivity() {
                 val l = lm.getLastKnownLocation(p) ?: continue
                 if (best == null || l.time > best.time) best = l
             }
-            if (best != null) LatLng(best.latitude, best.longitude) else null
+            if (best != null) GeoPoint(best.latitude, best.longitude) else null
         } catch (e: Exception) {
             null
         }
     }
 
-    override fun onStart() {
-        super.onStart()
-        mapView.onStart()
-    }
-
     override fun onResume() {
         super.onResume()
-        mapView.onResume()
+        map.onResume()
     }
 
     override fun onPause() {
-        mapView.onPause()
+        map.onPause()
         super.onPause()
-    }
-
-    override fun onStop() {
-        mapView.onStop()
-        super.onStop()
-    }
-
-    override fun onDestroy() {
-        mapView.onDestroy()
-        super.onDestroy()
-    }
-
-    override fun onLowMemory() {
-        super.onLowMemory()
-        mapView.onLowMemory()
-    }
-
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        mapView.onSaveInstanceState(outState)
     }
 }
