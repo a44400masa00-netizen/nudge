@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
@@ -13,9 +14,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 時計アプリでタイマー・アラームを確認画面なしで即セットするための権限（無ければ確認画面が一瞬出るだけ） -->
+    <uses-permission
+        android:name="com.android.alarm.permission.SET_ALARM"
+        tools:ignore="ProtectedPermissions" />
     <uses-permission
         android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
@@ -80,15 +84,6 @@
             android:name=".voice.VoiceListenerService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
-
-        <service
-            android:name=".voice.AlarmRingService"
-            android:exported="false"
-            android:foregroundServiceType="mediaPlayback" />
-
-        <receiver
-            android:name=".voice.AlarmReceiver"
-            android:exported="false" />
 
         <!-- 何もしない通知リスナー。許可すると、ハンズフリーでアプリを開いたり、
              音楽アプリの再生状態を操作できるようになる（通知の中身は読まない） -->

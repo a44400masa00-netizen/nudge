@@ -1,5 +1,6 @@
 package com.example.studynudge.voice
 
+import android.Manifest
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -67,18 +68,10 @@ object PhoneActions {
   private fun execute(ctx: Context, name: String, args: JSONObject): Outcome = when (name) {
     "set_timer" -> setTimer(ctx, args)
     "set_alarm" -> setAlarm(ctx, args)
-    "cancel_timers" -> {
-      Alarms.cancelAll(ctx, "timer")
-      ok()
-    }
-    "cancel_alarms" -> {
-      Alarms.cancelAll(ctx, "alarm")
-      ok()
-    }
-    "stop_ringing" -> {
-      AlarmRingService.stop(ctx)
-      ok()
-    }
+    "show_alarms" -> showAlarms(ctx)
+    "add_calendar_event" -> addCalendarEvent(ctx, args)
+    "compose_email" -> composeEmail(ctx, args)
+    "open_google_home" -> openGoogleHome(ctx)
     "flashlight" -> flashlight(ctx, args.optBoolean("on", true))
     "volume" -> volume(ctx, args)
     "brightness" -> brightness(ctx, args)
@@ -92,21 +85,149 @@ object PhoneActions {
     else -> fail("その操作にはまだ対応していません。")
   }
 
-  // ---- タイマー・アラーム ---------------------------------------------------------
+  // ---- タイマー・アラーム（Android標準の時計アプリに設定する） -----------------------
 
   private fun setTimer(ctx: Context, args: JSONObject): Outcome {
     val seconds = args.optLong("seconds", 0L)
     if (seconds < 1 || seconds > 24 * 3600L) return fail("タイマーの時間が分かりませんでした。")
-    val err = Alarms.schedule(ctx, "timer", System.currentTimeMillis() + seconds * 1000, args.optString("label", ""))
-    return if (err != null) fail(err) else ok()
+    val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
+      putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds.toInt())
+      putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, args.optString("label", ""))
+      putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+      ctx.startActivity(intent)
+      ok("時計アプリにタイマーをセットしました。")
+    } catch (e: Exception) {
+      fail("時計アプリが見つからず、タイマーを設定できませんでした。")
+    }
   }
 
   private fun setAlarm(ctx: Context, args: JSONObject): Outcome {
     val hour = args.optInt("hour", -1)
     val minute = args.optInt("minute", 0)
     if (hour !in 0..23 || minute !in 0..59) return fail("アラームの時刻が分かりませんでした。")
-    val err = Alarms.schedule(ctx, "alarm", Alarms.nextTimeMillis(hour, minute), args.optString("label", ""))
-    return if (err != null) fail(err) else ok()
+    val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+      putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+      putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
+      putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, args.optString("label", ""))
+      putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+      ctx.startActivity(intent)
+      ok("時計アプリにアラームをセットしました。")
+    } catch (e: Exception) {
+      fail("時計アプリが見つからず、アラームを設定できませんでした。")
+    }
+  }
+
+  /** 「タイマーを止めて」「アラームを消して」など。標準の時計アプリでは個別の取り消しを
+   *  プログラムから行えないため、一覧を開いて手動で止めてもらう */
+  private fun showAlarms(ctx: Context): Outcome {
+    val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+      .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    return try {
+      ctx.startActivity(intent)
+      ok("時計アプリを開きました。そこで止めたり消したりしてください。")
+    } catch (e: Exception) {
+      fail("時計アプリを開けませんでした。")
+    }
+  }
+
+  // ---- カレンダー（Googleカレンダーと同期される端末のカレンダーに直接書き込む） --------
+
+  private fun addCalendarEvent(ctx: Context, args: JSONObject): Outcome {
+    if (ctx.checkSelfPermission(Manifest.permission.WRITE_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+      return fail("カレンダーへの書き込みが許可されていません。アプリの設定を確認してください。")
+    }
+    val title = args.optString("title", "").ifBlank { return fail("予定のタイトルが分かりませんでした。") }
+    val year = args.optInt("year", -1)
+    val month = args.optInt("month", -1) // 1-12
+    val day = args.optInt("day", -1)
+    val hour = args.optInt("hour", -1)
+    val minute = args.optInt("minute", 0)
+    if (year < 0 || month !in 1..12 || day !in 1..31 || hour !in 0..23 || minute !in 0..59) {
+      return fail("予定の日時が分かりませんでした。")
+    }
+    val cal = java.util.Calendar.getInstance()
+    cal.set(year, month - 1, day, hour, minute, 0)
+    cal.set(java.util.Calendar.MILLISECOND, 0)
+    val startMillis = cal.timeInMillis
+    val durationMinutes = args.optInt("duration_minutes", 60).coerceIn(5, 24 * 60)
+    val endMillis = startMillis + durationMinutes * 60_000L
+
+    val calId = findWritableCalendarId(ctx) ?: return fail("書き込めるカレンダーが見つかりませんでした。端末にGoogleアカウントが設定されているか確認してください。")
+
+    return try {
+      val values = android.content.ContentValues().apply {
+        put(android.provider.CalendarContract.Events.CALENDAR_ID, calId)
+        put(android.provider.CalendarContract.Events.TITLE, title)
+        put(android.provider.CalendarContract.Events.DTSTART, startMillis)
+        put(android.provider.CalendarContract.Events.DTEND, endMillis)
+        put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+      }
+      val uri = ctx.contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
+      if (uri != null) ok("カレンダーに「$title」を追加しました。") else fail("カレンダーへの追加に失敗しました。")
+    } catch (e: Exception) {
+      fail("カレンダーへの追加に失敗しました。")
+    }
+  }
+
+  private fun findWritableCalendarId(ctx: Context): Long? {
+    val proj = arrayOf(
+      android.provider.CalendarContract.Calendars._ID,
+      android.provider.CalendarContract.Calendars.ACCOUNT_TYPE,
+      android.provider.CalendarContract.Calendars.IS_PRIMARY,
+      android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL
+    )
+    val cursor = ctx.contentResolver.query(android.provider.CalendarContract.Calendars.CONTENT_URI, proj, null, null, null)
+    var best: Long? = null
+    var bestScore = -1
+    cursor?.use { c ->
+      while (c.moveToNext()) {
+        val access = c.getInt(3)
+        if (access < android.provider.CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) continue
+        val isGoogle = c.getString(1) == "com.google"
+        val isPrimary = c.getInt(2) == 1
+        val score = (if (isGoogle) 2 else 0) + (if (isPrimary) 1 else 0)
+        if (score > bestScore) {
+          bestScore = score
+          best = c.getLong(0)
+        }
+      }
+    }
+    return best
+  }
+
+  // ---- メール（Gmailを含む、端末のメールアプリで作成画面を開く） ----------------------
+
+  private fun composeEmail(ctx: Context, args: JSONObject): Outcome {
+    val to = args.optString("to", "")
+    val subject = args.optString("subject", "")
+    val body = args.optString("body", "")
+    val intent = Intent(Intent.ACTION_SENDTO).apply {
+      data = Uri.parse("mailto:" + Uri.encode(to).replace("%40", "@"))
+      if (subject.isNotBlank()) putExtra(Intent.EXTRA_SUBJECT, subject)
+      if (body.isNotBlank()) putExtra(Intent.EXTRA_TEXT, body)
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+    return try {
+      ctx.startActivity(intent)
+      ok("メールの作成画面を開きました。")
+    } catch (e: Exception) {
+      fail("メールアプリを開けませんでした。")
+    }
+  }
+
+  // ---- Google Home（アプリを開くところまで。個別の家電操作は非対応） -----------------
+
+  private fun openGoogleHome(ctx: Context): Outcome {
+    val intent = ctx.packageManager.getLaunchIntentForPackage("com.google.android.apps.chromecast.app")
+      ?: AppFinder.find(ctx, "home")?.let { ctx.packageManager.getLaunchIntentForPackage(it.packageName) }
+    if (intent == null) return fail("Google Homeアプリが見つかりませんでした。インストールされているか確認してください。")
+    return launchOrNotify(ctx, intent, intent.`package`, "Google Home")
   }
 
   // ---- ライト・音量・明るさ ---------------------------------------------------------

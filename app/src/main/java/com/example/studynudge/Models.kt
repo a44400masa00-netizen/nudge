@@ -51,6 +51,10 @@ object Perm {
         ContextCompat.checkSelfPermission(c, Manifest.permission.READ_CALENDAR) ==
             PackageManager.PERMISSION_GRANTED
 
+    fun hasCalendarWrite(c: Context): Boolean =
+        ContextCompat.checkSelfPermission(c, Manifest.permission.WRITE_CALENDAR) ==
+            PackageManager.PERMISSION_GRANTED
+
     fun hasMic(c: Context): Boolean =
         ContextCompat.checkSelfPermission(c, Manifest.permission.RECORD_AUDIO) ==
             PackageManager.PERMISSION_GRANTED

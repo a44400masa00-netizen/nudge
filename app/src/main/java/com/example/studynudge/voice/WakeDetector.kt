@@ -216,8 +216,9 @@ class WakeDetector(
     /**
      * 反応のしやすさ。誤反応が多ければ THRESHOLD を 0.7 くらいに上げる。
      * 呼びかけても反応しなければ 0.35 くらいに下げる。
+     * → 実際に「呼んでいないのに喋り出す」誤検知が報告されたため、初期値を安全側に上げてある。
      */
-    private const val THRESHOLD = 0.5f
-    private const val HITS_REQUIRED = 2 // 80msごとのスコアが連続して閾値を超えたら検出（誤反応を減らす）
+    private const val THRESHOLD = 0.72f
+    private const val HITS_REQUIRED = 4 // 80msごとのスコアが連続して閾値を超えたら検出（誤反応を減らす）
   }
 }

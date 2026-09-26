@@ -298,8 +298,11 @@ class MainActivity : AppCompatActivity() {
         root.addView(
             note(
                 "「ヘイ、デイリー」と呼びかけると起動する、常駐の音声アシスタントです。" +
-                    "タイマー・アラーム・音楽再生・ライト・音量などをハンズフリーで操作できます。" +
-                    "呼びかけの言葉（ヘイ、デイリー）は学習済みモデルに固定されており、アプリ名を変えても変更できません。"
+                    "タイマー・アラームはAndroid標準の時計アプリにセットします。" +
+                    "カレンダーへの予定追加（Googleカレンダーと同期）、メールの作成画面を開く、" +
+                    "Google Homeアプリを開く、ライト・音量などもハンズフリーで操作できます。" +
+                    "呼びかけの言葉（ヘイ、デイリー）は学習済みモデルに固定されており、アプリ名を変えても変更できません。" +
+                    "誤って反応することが多い場合は、下の説明にある THRESHOLD の値をさらに上げてください。"
             )
         )
         voiceEnabledSwitch = switchRow("音声アシスタントを有効にする", VoiceListenerService.running)
@@ -373,6 +376,7 @@ class MainActivity : AppCompatActivity() {
         list.add(Manifest.permission.ACCESS_FINE_LOCATION)
         list.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         list.add(Manifest.permission.READ_CALENDAR)
+        list.add(Manifest.permission.WRITE_CALENDAR)
         list.add(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) list.add(Manifest.permission.POST_NOTIFICATIONS)
         permLauncher.launch(list.toTypedArray())
@@ -506,7 +510,8 @@ class MainActivity : AppCompatActivity() {
         line(Perm.hasOverlay(this), "他のアプリの上に表示")
         line(Perm.hasUsage(this), "使用状況へのアクセス")
         line(Perm.hasLocation(this), "位置情報")
-        line(Perm.hasCalendar(this), "カレンダー")
+        line(Perm.hasCalendar(this), "カレンダー（読み取り）")
+        line(Perm.hasCalendarWrite(this), "カレンダー（予定の追加）")
         line(Perm.hasMic(this), "マイク")
         line(Perm.hasNotificationListener(this), "通知へのアクセス")
         line(Perm.hasExactAlarm(this), "正確なアラーム")
