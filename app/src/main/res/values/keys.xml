@@ -1,0 +1,4 @@
+<resources>
+    <!-- ここを自分のGoogle Maps APIキーに書き換える -->
+    <string name="google_maps_key">ここにAPIキーを貼り付け</string>
+</resources>
