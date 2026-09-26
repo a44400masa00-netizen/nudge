@@ -7,6 +7,17 @@ android {
     namespace = "com.example.studynudge"
     compileSdk = 34
 
+    signingConfigs {
+        getByName("debug") {
+            // ビルドのたびに署名が変わってインストールできなくなる問題を防ぐため、
+            // ランダム生成のデバッグ鍵ではなく、リポジトリに含めた固定の鍵を使う
+            storeFile = rootProject.file("keystore/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     defaultConfig {
         applicationId = "com.example.studynudge"
         minSdk = 26
