@@ -234,18 +234,32 @@ class NudgeService : Service() {
         handler.post { overlay.start() }
 
         var received = false
-        val apiKey = prefs.apiKey
-        if (apiKey.isBlank()) {
-            prefs.lastError = "Gemini APIキーが未設定です（定型文を表示）"
-        } else {
+        val relayPrefs = RelayPrefs(this)
+        if (relayPrefs.isConfigured()) {
             try {
-                GeminiClient.stream(apiKey, prefs.model, Prompts.SYSTEM, Prompts.user(s, trigger, prefs)) { chunk ->
-                    received = true
-                    handler.post { overlay.push(chunk) }
-                }
+                val text = RelayClient.ask(relayPrefs.dbUrl, relayPrefs.secret, Prompts.SYSTEM, Prompts.user(s, trigger, prefs))
+                received = true
+                handler.post { overlay.push(text) }
                 prefs.lastError = ""
             } catch (e: Exception) {
-                prefs.lastError = "AI接続エラー: ${e.message}"
+                prefs.lastError = "パソコンのAIエラー: ${e.message}（Geminiを試します）"
+            }
+        }
+
+        if (!received) {
+            val apiKey = prefs.apiKey
+            if (apiKey.isBlank()) {
+                if (prefs.lastError.isBlank()) prefs.lastError = "Gemini APIキーが未設定です（定型文を表示）"
+            } else {
+                try {
+                    GeminiClient.stream(apiKey, prefs.model, Prompts.SYSTEM, Prompts.user(s, trigger, prefs)) { chunk ->
+                        received = true
+                        handler.post { overlay.push(chunk) }
+                    }
+                    prefs.lastError = ""
+                } catch (e: Exception) {
+                    prefs.lastError = "AI接続エラー: ${e.message}"
+                }
             }
         }
         if (!received) {

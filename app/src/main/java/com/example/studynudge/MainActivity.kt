@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var reminderPrefs: com.example.studynudge.reminder.Prefs
     private lateinit var voicePrefs: VoicePrefs
+    private lateinit var relayPrefs: RelayPrefs
 
     private lateinit var statusView: TextView
     private lateinit var apiKeyEdit: EditText
@@ -61,6 +62,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var reminderStartEdit: EditText
     private lateinit var reminderEndEdit: EditText
     private lateinit var reminderStatusView: TextView
+
+    // --- パソコンのローカルAI中継 ---
+    private lateinit var relayEnabledSwitch: MaterialSwitch
+    private lateinit var relayDbUrlEdit: EditText
+    private lateinit var relaySecretEdit: EditText
+    private lateinit var relayStatusView: TextView
 
     // --- 音声アシスタント（デイリー機能） ---
     private lateinit var voiceEnabledSwitch: MaterialSwitch
@@ -326,6 +333,7 @@ class MainActivity : AppCompatActivity() {
         prefs = Prefs(this)
         reminderPrefs = com.example.studynudge.reminder.Prefs(this)
         voicePrefs = VoicePrefs(this)
+        relayPrefs = RelayPrefs(this)
         com.example.studynudge.reminder.NotificationHelper.createChannels(this)
 
         val scroll = ScrollView(this)
@@ -394,6 +402,24 @@ class MainActivity : AppCompatActivity() {
         earlyEdit = textField(nudgeContent, "早朝の基準（時, 0〜23）", prefs.earlyHour.toString(), numeric = true)
         note(nudgeContent, "就寝時刻を過ぎての使用には「夜更かしですか」、早朝の基準より前に使い始めると「おはようございます」というメッセージになります。")
         filledButton(nudgeContent, "この設定を保存") { saveSettings() }
+
+        // --- パソコンのローカルAI中継 ---
+        val relayContent = card(root, R.drawable.ic_pc, MaterialR.attr.colorPrimaryContainer, MaterialR.attr.colorOnPrimaryContainer, "パソコンのローカルAI", "Geminiの無料枠を節約したい時に")
+        note(relayContent, "パソコンのブラウザで「Nudgeローカルai中継」のページを開いたままにしておくと、勉強の声かけは、まずこちらに問い合わせるようになります。パソコンが繋がらない時は、自動的にGeminiに切り替わります。")
+        relayEnabledSwitch = switchRow(relayContent, "パソコンのAIを使う", initial = relayPrefs.enabled)
+        relayDbUrlEdit = textField(relayContent, "FirebaseのデータベースURL", relayPrefs.dbUrl)
+        relaySecretEdit = textField(relayContent, "合言葉（パソコン側と同じもの）", relayPrefs.secret)
+        filledButton(relayContent, "この設定を保存") { saveRelaySettings() }
+        relayStatusView = TextView(this)
+        relayStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        relayStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        relayStatusView.setPadding(dp(4f), dp(10f), dp(4f), 0)
+        relayContent.addView(relayStatusView)
+        outlinedButton(relayContent, "接続をテストする") { testRelay() }.also {
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(44f))
+            lp.topMargin = dp(6f)
+            relayContent.addView(it, lp)
+        }
 
         // --- ③ 登録した場所 ---
         val placesContent = card(root, R.drawable.ic_pin, MaterialR.attr.colorSecondaryContainer, MaterialR.attr.colorOnSecondaryContainer, "登録した場所", "タップして地図でピンを置く")
@@ -550,6 +576,32 @@ class MainActivity : AppCompatActivity() {
         refresh()
     }
 
+    private fun saveRelaySettings() {
+        relayPrefs.enabled = relayEnabledSwitch.isChecked
+        relayPrefs.dbUrl = relayDbUrlEdit.text.toString().trim()
+        relayPrefs.secret = relaySecretEdit.text.toString().trim()
+        Toast.makeText(this, "保存しました", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun testRelay() {
+        saveRelaySettings()
+        val dbUrl = relayDbUrlEdit.text.toString().trim()
+        val secret = relaySecretEdit.text.toString().trim()
+        if (dbUrl.isBlank() || secret.isBlank()) {
+            relayStatusView.text = "データベースURLと合言葉の両方を入力してください。"
+            return
+        }
+        relayStatusView.text = "接続テスト中…（パソコン側でページを開いておいてください）"
+        Thread {
+            try {
+                val reply = RelayClient.ask(dbUrl, secret, null, "これは接続テストです。「テスト成功」とだけ返してください。", timeoutMs = 30_000L)
+                handler.post { relayStatusView.text = "成功しました: " + reply.take(80) }
+            } catch (e: Exception) {
+                handler.post { relayStatusView.text = "失敗しました: " + e.message }
+            }
+        }.start()
+    }
+
     private fun saveReminderSettings() {
         reminderPrefs.enabled = reminderEnabledSwitch.isChecked
         val startHour = (reminderStartEdit.text.toString().toIntOrNull() ?: 18).coerceIn(0, 23)
@@ -678,6 +730,7 @@ class MainActivity : AppCompatActivity() {
         line(Perm.hasExactAlarm(this), "正確なアラーム")
         line(Perm.isIgnoringBatteryOptimizations(this), "電池の最適化から除外")
         line(prefs.apiKey.isNotBlank(), "Gemini APIキー（勉強の声かけ）")
+        line(relayPrefs.isConfigured(), "パソコンのローカルAI（設定済み・任意）")
         line(NudgeService.running, if (NudgeService.running) "見守り中" else "停止中")
         val err = prefs.lastError
         if (err.isNotEmpty()) sb.append("\n直近のエラー: ").append(err)
