@@ -464,10 +464,8 @@ class VoiceListenerService : Service() {
       val apiKey = prefs.getString("api_key", "").orEmpty()
       val model = prefs.getString("model", "gemini-3.8-flash").orEmpty().ifBlank { "gemini-3.8-flash" }
 
-      val brainMode = prefs.getString("brain", "auto").orEmpty().ifBlank { "auto" }
-
-      if (!Brain.canAnswer(applicationContext, brainMode, apiKey)) {
-        main.post { deliverError(text, Brain.missingMessage(brainMode)) }
+      if (!Brain.canAnswer(applicationContext, apiKey)) {
+        main.post { deliverError(text, Brain.missingMessage()) }
         return@execute
       }
 
@@ -477,7 +475,8 @@ class VoiceListenerService : Service() {
       history.add(GeminiClient.Turn("user", text))
 
       try {
-        val reply = Brain.ask(applicationContext, brainMode, apiKey, model, PromptBuilder.build(applicationContext), trimmedHistory())
+        val compact = com.example.studynudge.RelayPrefs(applicationContext).isConfigured()
+        val reply = Brain.ask(applicationContext, apiKey, model, PromptBuilder.build(applicationContext, compact), trimmedHistory())
         val ignored = reply.contains(PromptBuilder.IGNORE_TOKEN)
         if (ignored && !addressed) {
           // 動画や周囲の声など、デイリーへの話しかけではない → 何も言わず聞き取りに戻る

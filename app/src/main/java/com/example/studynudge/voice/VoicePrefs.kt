@@ -22,11 +22,6 @@ class VoicePrefs(context: Context) {
         get() = sp.getBoolean("speak", true)
         set(v) { sp.edit().putBoolean("speak", v).apply() }
 
-    /** auto / cloud / device */
-    var brain: String
-        get() = sp.getString("brain", "auto") ?: "auto"
-        set(v) { sp.edit().putString("brain", v).apply() }
-
     /** masa / you */
     var callName: String
         get() = sp.getString("call_name", "masa") ?: "masa"

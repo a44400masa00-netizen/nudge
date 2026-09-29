@@ -1,53 +1,55 @@
 package com.example.studynudge.voice
 
 import android.content.Context
+import com.example.studynudge.RelayClient
+import com.example.studynudge.RelayPrefs
 
 /**
- * 返事を作る「頭脳」の選択。
- *   auto  : まず Gemini。使えないとき（回数制限・混雑・通信なし）は端末内AIで答える
- *   cloud : Gemini だけ
- *   device: 端末内AIだけ（オフラインでも動く）
+ * 返事を作る「頭脳」。設定されていれば、まずパソコンのローカルAI（中継）を試し、
+ * 繋がらなければGeminiを使う。端末内AI（オフラインモデル）は使わない。
  */
 object Brain {
 
-  fun canAnswer(ctx: Context, mode: String, apiKey: String): Boolean = when (mode) {
-    "device" -> LocalModel.isReady(ctx)
-    "cloud" -> apiKey.isNotBlank()
-    else -> apiKey.isNotBlank() || LocalModel.isReady(ctx)
+  fun canAnswer(ctx: Context, apiKey: String): Boolean {
+    val relay = RelayPrefs(ctx)
+    return relay.isConfigured() || apiKey.isNotBlank()
   }
 
-  fun missingMessage(mode: String): String =
-    if (mode == "device") "端末内AIのモデルがありません。アプリの設定からダウンロードしてください。"
-    else "アプリを開いて、設定でジェミニのAPIキーを入れてください。"
+  fun missingMessage(): String =
+    "アプリを開いて、設定でGeminiのAPIキーを入れるか、パソコンのローカルAIを設定してください。"
 
   fun ask(
     ctx: Context,
-    mode: String,
     apiKey: String,
     model: String,
     systemPrompt: String,
     history: List<GeminiClient.Turn>
   ): String {
-    val localReady = LocalModel.isReady(ctx)
+    val relay = RelayPrefs(ctx)
+    if (relay.isConfigured()) {
+      try {
+        return RelayClient.ask(relay.dbUrl, relay.secret, systemPrompt, flatten(history))
+      } catch (e: Exception) {
+        if (apiKey.isBlank()) throw GeminiClient.GeminiException("パソコンのAIに繋がりませんでした: ${e.message}")
+        // 繋がらなかったので、Geminiにフォールバックする
+      }
+    }
+    if (apiKey.isBlank()) throw GeminiClient.GeminiException(missingMessage())
+    return GeminiClient.ask(apiKey, model, systemPrompt, history)
+  }
 
-    if (mode == "device") {
-      if (!localReady) throw GeminiClient.GeminiException(missingMessage(mode))
-      return LocalLlm.ask(ctx, systemPrompt, history)
+  /**
+   * パソコンのローカルAI中継は複数ターンの会話を受け付けないため、1つの文にまとめる。
+   * 多くのローカルAIは文脈の上限が4096トークン程度と狭いため、直近だけに絞る。
+   */
+  private fun flatten(history: List<GeminiClient.Turn>): String {
+    val recent = history.takeLast(8)
+    if (recent.size == 1) return recent[0].text
+    val sb = StringBuilder()
+    for (t in recent) {
+      sb.append(if (t.role == "user") "ユーザー: " else "アシスタント: ")
+      sb.append(t.text).append("\n")
     }
-    if (mode == "cloud") {
-      return GeminiClient.ask(apiKey, model, systemPrompt, history)
-    }
-
-    // auto
-    if (apiKey.isBlank()) {
-      if (!localReady) throw GeminiClient.GeminiException(missingMessage(mode))
-      return LocalLlm.ask(ctx, systemPrompt, history)
-    }
-    return try {
-      GeminiClient.ask(apiKey, model, systemPrompt, history)
-    } catch (e: GeminiClient.GeminiException) {
-      if (!localReady) throw e
-      LocalLlm.ask(ctx, systemPrompt, history) // Gemini が使えないので、端末内AIで答える
-    }
+    return sb.toString()
   }
 }

@@ -14,7 +14,10 @@ import android.provider.Settings
 import android.text.InputType
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
+import android.view.animation.AccelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
@@ -27,7 +30,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.widget.ImageViewCompat
 import com.example.studynudge.reminder.Engine as ReminderEngine
-import com.example.studynudge.voice.LocalModel
 import com.example.studynudge.voice.VoiceListenerService
 import com.example.studynudge.voice.VoicePrefs
 import com.google.android.material.card.MaterialCardView
@@ -74,20 +76,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var voiceApiKeyEdit: EditText
     private lateinit var voiceModelEdit: EditText
     private lateinit var voiceSpeakSwitch: MaterialSwitch
-    private lateinit var voiceBrainDropdown: MaterialAutoCompleteTextView
+    private lateinit var voiceBrainStatusView: TextView
     private lateinit var voiceCallNameDropdown: MaterialAutoCompleteTextView
     private lateinit var voiceToneDropdown: MaterialAutoCompleteTextView
     private lateinit var voiceMusicAppEdit: EditText
     private lateinit var voiceSpotifyIdEdit: EditText
     private lateinit var voiceSpotifySecretEdit: EditText
-    private lateinit var voiceModelStatusView: TextView
     private lateinit var voiceStatusView: TextView
 
-    private val brainOptions = listOf(
-        "auto" to "自動（Geminiが使えない時だけ端末内AI）",
-        "cloud" to "クラウドのみ（Gemini）",
-        "device" to "端末内AIのみ（オフライン可・要ダウンロード）"
-    )
     private val callNameOptions = listOf("masa" to "「まさ」と呼ぶ", "you" to "「あなた」と呼ぶ")
     private val toneOptions = listOf("polite" to "丁寧な敬語", "casual" to "タメ口")
 
@@ -134,7 +130,7 @@ class MainActivity : AppCompatActivity() {
         return frame
     }
 
-    /** 大きく角丸のカードを1枚作り、その中身を入れるための入れ物を返す */
+    /** 大きく角丸のカードを1枚作り、その中身を入れるための入れ物を返す。見出しをタップすると開閉する */
     private fun card(pageRoot: LinearLayout, iconRes: Int, badgeBg: Int, badgeFg: Int, title: String, subtitle: String? = null): LinearLayout {
         val cv = MaterialCardView(this)
         cv.radius = dp(24f).toFloat()
@@ -153,6 +149,11 @@ class MainActivity : AppCompatActivity() {
         val header = LinearLayout(this)
         header.orientation = LinearLayout.HORIZONTAL
         header.gravity = Gravity.CENTER_VERTICAL
+        header.isClickable = true
+        header.isFocusable = true
+        val ripple = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackground, ripple, true)
+        header.setBackgroundResource(ripple.resourceId)
         header.addView(iconBadge(iconRes, badgeBg, badgeFg), LinearLayout.LayoutParams(dp(40f), dp(40f)))
 
         val titleCol = LinearLayout(this)
@@ -172,12 +173,47 @@ class MainActivity : AppCompatActivity() {
             titleCol.addView(subTv)
         }
         header.addView(titleCol, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+
+        val chevron = ImageView(this)
+        chevron.setImageResource(R.drawable.ic_chevron_right)
+        ImageViewCompat.setImageTintList(chevron, ColorStateList.valueOf(themeColor(MaterialR.attr.colorOnSurfaceVariant)))
+        chevron.rotation = 0f
+        header.addView(chevron, LinearLayout.LayoutParams(dp(22f), dp(22f)))
         inner.addView(header)
 
         val content = LinearLayout(this)
         content.orientation = LinearLayout.VERTICAL
         content.setPadding(0, dp(14f), 0, 0)
+        content.visibility = View.GONE
+        content.pivotY = 0f
+        content.scaleY = 0f
+        content.alpha = 0f
         inner.addView(content)
+
+        var expanded = false
+        header.setOnClickListener {
+            expanded = !expanded
+            chevron.animate().rotation(if (expanded) 90f else 0f).setDuration(280).start()
+            if (expanded) {
+                content.visibility = View.VISIBLE
+                content.scaleY = 0f
+                content.alpha = 0f
+                content.animate()
+                    .scaleY(1f)
+                    .alpha(1f)
+                    .setDuration(500)
+                    .setInterpolator(OvershootInterpolator(4.5f))
+                    .start()
+            } else {
+                content.animate()
+                    .scaleY(0f)
+                    .alpha(0f)
+                    .setDuration(200)
+                    .setInterpolator(AccelerateInterpolator())
+                    .withEndAction { content.visibility = View.GONE }
+                    .start()
+            }
+        }
         return content
     }
 
@@ -406,7 +442,7 @@ class MainActivity : AppCompatActivity() {
         // --- パソコンのローカルAI中継 ---
         val relayContent = card(root, R.drawable.ic_pc, MaterialR.attr.colorPrimaryContainer, MaterialR.attr.colorOnPrimaryContainer, "パソコンのローカルAI", "Geminiの無料枠を節約したい時に")
         note(relayContent, "パソコンのブラウザで「Nudgeローカルai中継」のページを開いたままにしておくと、勉強の声かけは、まずこちらに問い合わせるようになります。パソコンが繋がらない時は、自動的にGeminiに切り替わります。")
-        relayEnabledSwitch = switchRow(relayContent, "パソコンのAIを使う", initial = relayPrefs.enabled)
+        relayEnabledSwitch = switchRow(relayContent, "パソコン内のAIを使用する", initial = relayPrefs.enabled)
         relayDbUrlEdit = textField(relayContent, "FirebaseのデータベースURL", relayPrefs.dbUrl)
         relaySecretEdit = textField(relayContent, "合言葉（パソコン側と同じもの）", relayPrefs.secret)
         filledButton(relayContent, "この設定を保存") { saveRelaySettings() }
@@ -502,7 +538,20 @@ class MainActivity : AppCompatActivity() {
         voiceApiKeyEdit = textField(voiceContent, "Gemini APIキー（空欄なら②と共通）", voicePrefs.apiKey)
         voiceModelEdit = textField(voiceContent, "モデル名", voicePrefs.model)
         voiceSpeakSwitch = switchRow(voiceContent, "声で読み上げる", initial = voicePrefs.speak)
-        voiceBrainDropdown = dropdownField(voiceContent, "頭脳の選び方", brainOptions, voicePrefs.brain)
+
+        val brainLabel = TextView(this)
+        brainLabel.text = "使用するAI"
+        brainLabel.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        brainLabel.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
+        brainLabel.setPadding(dp(4f), dp(14f), dp(4f), dp(2f))
+        voiceContent.addView(brainLabel)
+        voiceBrainStatusView = TextView(this)
+        voiceBrainStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+        voiceBrainStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
+        voiceBrainStatusView.setPadding(dp(4f), 0, dp(4f), 0)
+        voiceContent.addView(voiceBrainStatusView)
+        note(voiceContent, "「パソコン内のAIを使用する」を上のカードで有効にすると、こちらもまずパソコンに問い合わせ、繋がらなければGeminiを使います。端末（スマホ本体）だけで動くAIは、このアプリでは扱いません。")
+
         voiceCallNameDropdown = dropdownField(voiceContent, "呼び方", callNameOptions, voicePrefs.callName)
         voiceToneDropdown = dropdownField(voiceContent, "話し方", toneOptions, voicePrefs.tone)
         voiceMusicAppEdit = textField(voiceContent, "音楽アプリ名（例: Spotify）", voicePrefs.musicApp)
@@ -510,37 +559,6 @@ class MainActivity : AppCompatActivity() {
         voiceSpotifyIdEdit = textField(voiceContent, "Spotify Client ID（任意）", voicePrefs.spotifyClientId)
         voiceSpotifySecretEdit = textField(voiceContent, "Spotify Client Secret（任意）", voicePrefs.spotifyClientSecret)
         filledButton(voiceContent, "この設定を保存") { saveVoiceSettings() }
-
-        val modelHeader = TextView(this)
-        modelHeader.text = "端末内AI（オフラインモデル）"
-        modelHeader.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-        modelHeader.setTypeface(modelHeader.typeface, Typeface.BOLD)
-        modelHeader.setTextColor(themeColor(MaterialR.attr.colorOnSurface))
-        modelHeader.setPadding(dp(4f), dp(18f), dp(4f), dp(2f))
-        voiceContent.addView(modelHeader)
-        voiceModelStatusView = TextView(this)
-        voiceModelStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-        voiceModelStatusView.setTextColor(themeColor(MaterialR.attr.colorOnSurfaceVariant))
-        voiceModelStatusView.setPadding(dp(4f), 0, dp(4f), 0)
-        voiceContent.addView(voiceModelStatusView)
-        val modelRow = LinearLayout(this)
-        modelRow.orientation = LinearLayout.HORIZONTAL
-        modelRow.setPadding(0, dp(8f), 0, 0)
-        val dlBtn = outlinedButton(modelRow, "ダウンロード（約2.1GB）") {
-            LocalModel.start(this)
-            Toast.makeText(this, "通知バーで進み具合を確認できます", Toast.LENGTH_LONG).show()
-            handler.postDelayed({ refresh() }, 1500L)
-        }
-        modelRow.addView(dlBtn, LinearLayout.LayoutParams(0, dp(44f), 1f))
-        val spacer2 = android.view.View(this)
-        modelRow.addView(spacer2, LinearLayout.LayoutParams(dp(10f), 0))
-        val delModelBtn = outlinedButton(modelRow, "削除") {
-            LocalModel.deleteAll(this)
-            refresh()
-        }
-        modelRow.addView(delModelBtn, LinearLayout.LayoutParams(0, dp(44f), 1f))
-        voiceContent.addView(modelRow)
-        note(voiceContent, "端末内AIはビルドが失敗しやすい部分です。エラーになる場合は build.gradle.kts の llama-android の行を削除して再ビルドしてください（クラウド版のみで動きます）。")
 
         voiceStatusView = TextView(this)
         voiceStatusView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
@@ -617,7 +635,6 @@ class MainActivity : AppCompatActivity() {
         val m = voiceModelEdit.text.toString().trim()
         if (m.isNotEmpty()) voicePrefs.model = m
         voicePrefs.speak = voiceSpeakSwitch.isChecked
-        voicePrefs.brain = dropdownValue(voiceBrainDropdown, brainOptions)
         voicePrefs.callName = dropdownValue(voiceCallNameDropdown, callNameOptions)
         voicePrefs.tone = dropdownValue(voiceToneDropdown, toneOptions)
         voicePrefs.musicApp = voiceMusicAppEdit.text.toString().trim()
@@ -756,18 +773,10 @@ class MainActivity : AppCompatActivity() {
         reminderStatusView.text = rsb.toString().trim()
 
         // ⑥ 音声アシスタント
-        val ms = LocalModel.status(this)
-        val state = ms["state"] as? String ?: "none"
-        voiceModelStatusView.text = when (state) {
-            "ready" -> "状態: 準備完了（使用可能）"
-            "downloading" -> {
-                val d = (ms["downloaded"] as? Long) ?: 0L
-                val t = (ms["total"] as? Long) ?: 0L
-                val pct = if (t > 0) (d * 100 / t) else 0
-                "状態: ダウンロード中（${pct}%）"
-            }
-            "failed" -> "状態: ダウンロード失敗"
-            else -> "状態: 未ダウンロード"
+        voiceBrainStatusView.text = if (relayPrefs.isConfigured()) {
+            "パソコンのローカルAI（繋がらない時はGeminiに切り替え）"
+        } else {
+            "Gemini（上の「パソコンのローカルAI」を設定すると、そちらが優先されます）"
         }
         val vsb = StringBuilder()
         vsb.append(if (VoiceListenerService.running) "動作中\n" else "停止中\n")

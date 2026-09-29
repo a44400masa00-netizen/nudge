@@ -48,10 +48,4 @@ dependencies {
 
     // 音声アシスタント機能（呼びかけ検出）
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.27.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
-    // 音声アシスタント機能（端末内AI）。※このライブラリはビルドが失敗しやすい最大のリスク箇所。
-    // 失敗する場合はこの1行を削除し、LocalLlm.kt / LocalModel.kt の中身を空実装に差し替えれば、
-    // クラウド(Gemini)のみの音声アシスタントとして動作する。
-    implementation("dev.ffmpegkit-maintained:llama-android:0.1.1")
 }

@@ -25,7 +25,7 @@ object PromptBuilder {
 
   private fun hhmm(ts: Long): String = SimpleDateFormat("H:mm", Locale.JAPAN).format(Date(ts))
 
-  private fun describeUsage(ctx: Context): String {
+  private fun describeUsage(ctx: Context, compact: Boolean): String {
     if (!UsageCollector.hasPermission(ctx)) {
       return "【スマホ使用状況】ユーザーがまだ「使用状況へのアクセス」を許可していないため取得できません。" +
         "使用状況について聞かれたら、アプリを開いて許可するとアドバイスできることを伝えてください。"
@@ -41,18 +41,23 @@ object PromptBuilder {
     lines.add("- 画面ONの回数: ${u.screenOnCount}回 / ロック解除: ${u.unlockCount}回")
     if (u.apps.isNotEmpty()) {
       lines.add("- アプリ別（使用時間の長い順）:")
-      u.apps.take(8).forEach {
+      u.apps.take(if (compact) 4 else 8).forEach {
         lines.add("  ・${it.label}: ${formatDuration(it.totalMs)}、起動${it.launchCount}回、最終使用${hhmm(it.lastUsed)}")
       }
     }
     if (u.launches.isNotEmpty()) {
-      val recent = u.launches.takeLast(12).joinToString(" → ") { "${hhmm(it.timestamp)} ${it.label}" }
+      val recent = u.launches.takeLast(if (compact) 6 else 12).joinToString(" → ") { "${hhmm(it.timestamp)} ${it.label}" }
       lines.add("- 直近に起動したアプリ（時系列）: $recent")
     }
     return lines.joinToString("\n")
   }
 
-  fun build(ctx: Context): String {
+  /**
+   * compact = true のときは、使用状況の情報量を減らす。
+   * パソコンのローカルAI（多くは文脈の上限が4096トークン程度）に送る時に使い、
+   * 会話履歴やスマホ操作のルールが上限からあふれて効かなくなるのを防ぐ。
+   */
+  fun build(ctx: Context, compact: Boolean = false): String {
     val now = SimpleDateFormat("yyyy年M月d日(E) H:mm", Locale.JAPAN).format(Date())
     return listOf(
       "あなたの名前は「デイリー」です。ユーザーと音声でおしゃべりする、親しみやすいAIアシスタントです。",
@@ -74,7 +79,7 @@ object PromptBuilder {
       "# 現在日時",
       now,
       "",
-      describeUsage(ctx),
+      describeUsage(ctx, compact),
       "",
       extrasFromPrefs(ctx)
     ).joinToString("\n")
