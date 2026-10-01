@@ -9,27 +9,50 @@ import java.util.UUID
 /**
  * パソコンで開いているNudgeローカルAI中継ページに、Firebase Realtime Database経由で
  * 問い合わせるクライアント。ブロッキング呼び出しなので、必ずバックグラウンドスレッドから呼ぶこと。
+ *
+ * パソコン側のページは、動いている間ずっと alive に「最後の合図の時刻」を書き込む。
+ * ここでは、その合図が古ければ「ページが閉じている」とみなして、待たずにすぐ失敗させる
+ * （呼び出し側が、そのままGeminiに切り替えられるようにするため）。
  */
 object RelayClient {
     class RelayException(message: String) : Exception(message)
 
-    fun ask(dbUrl: String, secret: String, system: String?, prompt: String, timeoutMs: Long = 90_000L): String {
+    /** パソコン側の最後の合図が、これより古ければ「止まっている」とみなす */
+    private const val ALIVE_MAX_AGE_MS = 150_000L
+
+    fun ask(
+        dbUrl: String,
+        secret: String,
+        system: String?,
+        prompt: String,
+        timeoutMs: Long = 25_000L,
+        maxTokens: Int? = null
+    ): String {
         val base = dbUrl.trim().trimEnd('/')
         if (base.isBlank()) throw RelayException("データベースURLが未設定です")
+        val sec = enc(secret)
+
+        if (!isAlive(base, sec)) {
+            throw RelayException("パソコンのAIページが開かれていないようです（新しい版のページを開いて、開始してください）")
+        }
+
         val id = UUID.randomUUID().toString().replace("-", "")
-        val reqUrl = URL("$base/relay/${enc(secret)}/requests/$id.json")
-        val respUrl = URL("$base/relay/${enc(secret)}/responses/$id.json")
+        val reqUrl = URL("$base/relay/$sec/requests/$id.json")
+        val respUrl = URL("$base/relay/$sec/responses/$id.json")
 
         val body = JSONObject()
         body.put("prompt", prompt)
         if (!system.isNullOrBlank()) body.put("system", system)
+        if (maxTokens != null) body.put("max_tokens", maxTokens)
         body.put("status", "pending")
         putJson(reqUrl, body.toString())
 
         val start = System.currentTimeMillis()
         try {
+            var wait = 700L
             while (System.currentTimeMillis() - start < timeoutMs) {
-                Thread.sleep(1500)
+                Thread.sleep(wait)
+                wait = 500L
                 val raw = getJson(respUrl)
                 if (raw != null && raw != "null") {
                     val obj = JSONObject(raw)
@@ -38,12 +61,19 @@ object RelayClient {
                     return text
                 }
             }
-            throw RelayException("パソコンからの返答がタイムアウトしました（ページが開かれていない可能性があります）")
+            throw RelayException("パソコンからの返答が時間内に届きませんでした")
         } finally {
             // 後片付け。失敗しても致命的ではないので無視する
             try { deleteQuiet(respUrl) } catch (e: Exception) { }
             try { deleteQuiet(reqUrl) } catch (e: Exception) { }
         }
+    }
+
+    private fun isAlive(base: String, encSecret: String): Boolean {
+        val raw = getJson(URL("$base/relay/$encSecret/alive.json")) ?: return false
+        val ts = raw.trim().toLongOrNull() ?: return false
+        val age = System.currentTimeMillis() - ts
+        return age in -30_000L..ALIVE_MAX_AGE_MS
     }
 
     private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")

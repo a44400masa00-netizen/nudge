@@ -237,7 +237,10 @@ class NudgeService : Service() {
         val relayPrefs = RelayPrefs(this)
         if (relayPrefs.isConfigured()) {
             try {
-                val text = RelayClient.ask(relayPrefs.dbUrl, relayPrefs.secret, Prompts.SYSTEM, Prompts.user(s, trigger, prefs))
+                val text = RelayClient.ask(
+                    relayPrefs.dbUrl, relayPrefs.secret, Prompts.SYSTEM, Prompts.user(s, trigger, prefs),
+                    timeoutMs = 40_000L, maxTokens = 160
+                )
                 received = true
                 handler.post { overlay.push(text) }
                 prefs.lastError = ""

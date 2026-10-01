@@ -475,8 +475,12 @@ class VoiceListenerService : Service() {
       history.add(GeminiClient.Turn("user", text))
 
       try {
-        val compact = com.example.studynudge.RelayPrefs(applicationContext).isConfigured()
-        val reply = Brain.ask(applicationContext, apiKey, model, PromptBuilder.build(applicationContext, compact), trimmedHistory())
+        val reply = Brain.ask(
+          applicationContext, apiKey, model,
+          { PromptBuilder.build(applicationContext) },
+          { PromptBuilder.buildForRelay(applicationContext, text) },
+          trimmedHistory()
+        )
         val ignored = reply.contains(PromptBuilder.IGNORE_TOKEN)
         if (ignored && !addressed) {
           // 動画や周囲の声など、デイリーへの話しかけではない → 何も言わず聞き取りに戻る

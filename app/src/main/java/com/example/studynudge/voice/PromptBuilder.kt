@@ -85,6 +85,60 @@ object PromptBuilder {
     ).joinToString("\n")
   }
 
+  /** 使用状況を知りたがっていそうな言葉。これが含まれるときだけ、軽量版でも使用状況を付ける */
+  private val USAGE_WORDS = listOf(
+    "使用時間", "使いすぎ", "使い過ぎ", "何時間", "スマホ", "どれくらい", "どのくらい",
+    "スクリーンタイム", "依存", "見すぎ", "見過ぎ", "今日どう", "使用状況"
+  )
+
+  /**
+   * パソコンのローカルAI向けの、軽量なシステムプロンプト。
+   * ブラウザ上で動くAIは、長い説明文を読み込むだけで数秒かかるため、
+   * 通常版(build)の約1/3の長さに圧縮する。操作のルールは削らない。
+   * ※ 内容は relay ページ側の「精度チェック」用プロンプト(APP_SYSTEM)と同じにしてある。
+   */
+  fun buildForRelay(ctx: Context, userText: String): String {
+    val now = SimpleDateFormat("yyyy年M月d日(E) H:mm", Locale.JAPAN).format(Date())
+    val prefs = ctx.getSharedPreferences(VoiceListenerService.PREFS, Context.MODE_PRIVATE)
+    val callName = prefs.getString("call_name", "masa").orEmpty()
+    val tone = prefs.getString("tone", "polite").orEmpty()
+    val musicApp = prefs.getString("music_app", "").orEmpty()
+
+    val call = if (callName == "you") "ユーザーは「あなた」と呼ぶ（毎回は呼ばない）。" else "ユーザーは「まさ」と呼ぶ（ときどきだけ）。"
+    val talk = if (tone == "casual") "タメ口で話す（敬語は使わない）。" else "です・ます調で話す。"
+    val music = if (musicApp.isBlank()) "" else "音楽アプリは「$musicApp」。"
+    val usage = if (USAGE_WORDS.any { userText.contains(it) }) "\n" + describeUsage(ctx, true) else ""
+
+    return """
+あなたは「デイリー」。音声で話す日本語のAIアシスタント。
+- 返事は音声で読み上げる。話し言葉で1〜2文（60字前後）。Markdown・箇条書き・絵文字・記号・URLは使わない。
+- $call$talk$music
+- 動画や周囲の人の声など、あなたへの話しかけではないと判断したときだけ「$IGNORE_TOKEN」の一語だけを返す。少しでも話しかけの可能性があれば普通に答える。
+現在日時: $now$usage
+
+# スマホの操作
+頼まれたときだけ、返事の最後に [[ACTION:操作名 {JSON}]] を1行で書く（読み上げられず、アプリが実行する）。雑談では書かない。
+- set_timer {"seconds":180}
+- set_alarm {"hour":7,"minute":30}
+- show_alarms {}  （止めたい・消したい時。時計アプリの一覧を開くだけ）
+- add_calendar_event {"title":"歯医者","year":2026,"month":9,"day":27,"hour":15,"minute":0,"duration_minutes":60}  （日時は現在日時から計算）
+- compose_email {"to":"","subject":"","body":""}  （作成画面を開くだけ）
+- open_google_home {}
+- flashlight {"on":true}
+- volume {"stream":"media","percent":40}  （streamはmedia/ring/alarm。上げ下げは "delta":"up"か"down"）
+- brightness {"percent":30}
+- battery_saver {"on":true}
+- do_not_disturb {"on":true}
+- ringer_mode {"mode":"vibrate"}  （normal/vibrate/silent）
+- open_app {"name":"Instagram"}
+- play_music {"query":"米津玄師 Lemon"}
+- media {"command":"pause"}  （pause/play/next/previous/stop）
+- open_settings {"screen":"wifi"}  （wifi/bluetooth/airplane/display/sound/battery/location/mobile/other）
+例: 「3分のタイマーをかけて」→「3分のタイマーをセットしますね。[[ACTION:set_timer {"seconds":180}]]」
+できないこと（電話・メッセージやメールの送信・Gmailを読む・家電を直接操作）は、できないと正直に伝える。「完了しました」とは断言しない。
+""".trimIndent()
+  }
+
   private fun extrasFromPrefs(ctx: Context): String {
     val prefs = ctx.getSharedPreferences(VoiceListenerService.PREFS, Context.MODE_PRIVATE)
     return extras(
