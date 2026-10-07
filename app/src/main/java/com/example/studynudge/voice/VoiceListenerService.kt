@@ -464,6 +464,24 @@ class VoiceListenerService : Service() {
       val apiKey = prefs.getString("api_key", "").orEmpty()
       val model = prefs.getString("model", "gemini-3.8-flash").orEmpty().ifBlank { "gemini-3.8-flash" }
 
+      // 定型の操作（タイマー・音量・ライト・音楽など）は、AIを通さず、アプリ内で直接判定して実行する。
+      // 一瞬で反応し、間違えず、AIの無料枠も使わない。判定できなかった言葉だけがAIに渡る
+      val localReply = try {
+        LocalIntents.match(applicationContext, text, addressed)
+      } catch (e: Exception) {
+        null
+      }
+      if (localReply != null) {
+        val nowLocal = System.currentTimeMillis()
+        if (nowLocal - lastInteraction > IDLE_RESET_MS) history.clear()
+        lastInteraction = nowLocal
+        history.add(GeminiClient.Turn("user", text))
+        val spokenLocal = PhoneActions.process(applicationContext, localReply)
+        history.add(GeminiClient.Turn("model", spokenLocal))
+        main.post { deliverReply(text, spokenLocal) }
+        return@execute
+      }
+
       if (!Brain.canAnswer(applicationContext, apiKey)) {
         main.post { deliverError(text, Brain.missingMessage()) }
         return@execute
@@ -477,8 +495,8 @@ class VoiceListenerService : Service() {
       try {
         val reply = Brain.ask(
           applicationContext, apiKey, model,
-          { PromptBuilder.build(applicationContext) },
-          { PromptBuilder.buildForRelay(applicationContext, text) },
+          { PromptBuilder.buildJson(applicationContext, text, forRelay = false) },
+          { PromptBuilder.buildJson(applicationContext, text, forRelay = true) },
           trimmedHistory()
         )
         val ignored = reply.contains(PromptBuilder.IGNORE_TOKEN)

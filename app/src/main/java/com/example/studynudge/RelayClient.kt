@@ -26,7 +26,8 @@ object RelayClient {
         system: String?,
         prompt: String,
         timeoutMs: Long = 25_000L,
-        maxTokens: Int? = null
+        maxTokens: Int? = null,
+        schema: String? = null
     ): String {
         val base = dbUrl.trim().trimEnd('/')
         if (base.isBlank()) throw RelayException("データベースURLが未設定です")
@@ -44,6 +45,7 @@ object RelayClient {
         body.put("prompt", prompt)
         if (!system.isNullOrBlank()) body.put("system", system)
         if (maxTokens != null) body.put("max_tokens", maxTokens)
+        if (!schema.isNullOrBlank()) body.put("schema", schema)
         body.put("status", "pending")
         putJson(reqUrl, body.toString())
 

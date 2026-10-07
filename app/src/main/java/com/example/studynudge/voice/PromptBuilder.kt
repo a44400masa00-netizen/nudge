@@ -139,6 +139,68 @@ object PromptBuilder {
 """.trimIndent()
   }
 
+  /** JSON形式で返事をさせるための、操作の一覧（Geminiとパソコンのどちらにも共通） */
+  private const val JSON_ACTIONS = """
+
+# action と、使う項目（使う項目だけ書く。使わない項目は書かない）
+- set_timer: seconds（秒数）, label
+- set_alarm: hour, minute（24時間表記）, label
+- show_alarms: 項目なし（止めたい・消したい時。時計アプリの一覧を開くだけ）
+- add_calendar_event: title, year, month, day, hour, minute, duration_minutes（日時は現在日時から計算）
+- compose_email: to, subject, body（作成画面を開くだけ）
+- open_google_home: 項目なし
+- flashlight: on（true か false）
+- volume: stream（media/ring/alarm）と、percent または delta（up/down）
+- brightness: percent
+- battery_saver: on
+- do_not_disturb: on
+- ringer_mode: mode（normal/vibrate/silent）
+- open_app: name（アプリ名）
+- play_music: query（曲名・アーティスト名）
+- media: command（pause/play/next/previous/stop）
+- open_settings: screen（wifi/bluetooth/airplane/display/sound/battery/location/mobile/other）
+例:
+「3分のタイマー」→ {"reply":"3分のタイマーをセットしますね。","action":"set_timer","seconds":180}
+「ライトをつけて」→ {"reply":"ライトをつけますね。","action":"flashlight","on":true}
+「今日はいい天気だね」→ {"reply":"本当ですね。お出かけしたくなります。","action":"none"}
+できないこと（電話・メッセージやメールの送信・Gmailを読む・家電を直接操作）は、できないと正直に伝える（action は none）。「完了しました」とは断言しない。"""
+
+  /**
+   * AIにJSONで返事をさせるための説明文。出力の形は、AI側の仕組み（responseSchema など）でも強制するので、
+   * ここでは「どの操作で、どの項目を使うか」の説明に絞って短くしてある。
+   * forRelay = true はパソコンのAI向け（さらに軽量。使用状況は、聞かれたときだけ付ける）、
+   * false は Gemini 向け（使用状況を常に付ける）。
+   */
+  fun buildJson(ctx: Context, userText: String, forRelay: Boolean): String {
+    val now = SimpleDateFormat("yyyy年M月d日(E) H:mm", Locale.JAPAN).format(Date())
+    val prefs = ctx.getSharedPreferences(VoiceListenerService.PREFS, Context.MODE_PRIVATE)
+    val callName = prefs.getString("call_name", "masa").orEmpty()
+    val tone = prefs.getString("tone", "polite").orEmpty()
+    val musicApp = prefs.getString("music_app", "").orEmpty()
+
+    val call = if (callName == "you") "ユーザーは「あなた」と呼ぶ（毎回は呼ばない）。" else "ユーザーは「まさ」と呼ぶ（ときどきだけ）。"
+    val talk = if (tone == "casual") "タメ口で話す（敬語は使わない）。" else "です・ます調で話す。"
+    val music = if (musicApp.isBlank()) "" else "音楽アプリは「$musicApp」。"
+    val usage = if (forRelay) {
+      if (USAGE_WORDS.any { userText.contains(it) }) "\n" + describeUsage(ctx, true) else ""
+    } else {
+      "\n" + describeUsage(ctx, false)
+    }
+    val cloudNote = if (forRelay) "" else
+      "\n- 下の使用状況は、端末から取得した今日の実データ。数字は正確に使い、データにないことは作らない。" +
+        "使用状況を聞かれたときや自然なときは、データに基づいて具体的に助言する。説教くさくならず、責めない。"
+
+    return """
+あなたは「デイリー」。音声で話す日本語のAIアシスタント。
+出力は、次の項目を持つJSONだけ。
+- reply: 読み上げる返事。話し言葉で1〜2文（60字前後）。Markdown・箇条書き・絵文字・記号・URLは使わない。
+- action: スマホの操作。頼まれていないとき（雑談など）は none。
+- そのほか: 操作に使う項目（下の一覧のとおり、必要なものだけ）。
+- $call$talk$music
+- 動画や周囲の人の声など、あなたへの話しかけではないと判断したときだけ、reply を「$IGNORE_TOKEN」、action を none にする。少しでも話しかけの可能性があれば普通に答える。$cloudNote
+現在日時: $now$usage""".trimIndent() + JSON_ACTIONS
+  }
+
   private fun extrasFromPrefs(ctx: Context): String {
     val prefs = ctx.getSharedPreferences(VoiceListenerService.PREFS, Context.MODE_PRIVATE)
     return extras(

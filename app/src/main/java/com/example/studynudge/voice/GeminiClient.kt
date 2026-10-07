@@ -23,15 +23,30 @@ object GeminiClient {
   private val RETRYABLE = setOf(408, 500, 502, 503, 504)
   private val RETRY_DELAYS_MS = longArrayOf(1_000, 2_500)
 
-  /** ブロッキング呼び出し。必ずバックグラウンドスレッドから呼ぶこと。 */
-  fun ask(apiKey: String, model: String, systemPrompt: String, history: List<Turn>): String {
+  /**
+   * ブロッキング呼び出し。必ずバックグラウンドスレッドから呼ぶこと。
+   * @param responseSchema 指定すると、返事をこの形のJSONに強制する（形式の崩れを防ぐ）
+   */
+  fun ask(
+    apiKey: String,
+    model: String,
+    systemPrompt: String,
+    history: List<Turn>,
+    responseSchema: JSONObject? = null
+  ): String {
     // Gemini 3.x は thinkingLevel で思考量を調整（音声会話は速さ重視で low）
     var useThinking = model.startsWith("gemini-3")
+    var schema = responseSchema
     var attempt = 0
     while (true) {
       try {
-        return request(apiKey, model, systemPrompt, history, useThinking)
+        return request(apiKey, model, systemPrompt, history, useThinking, schema)
       } catch (e: HttpFailure) {
+        // 形式の指定が原因で拒否された場合は、指定を外して1回やり直す（文章はそのまま受け取れる）
+        if (e.status == 400 && schema != null && e.raw.contains("schema", ignoreCase = true)) {
+          schema = null
+          continue
+        }
         // 思考設定が原因で拒否された場合は、設定を外して1回やり直す
         if (e.status == 400 && useThinking && e.raw.contains("thinking", ignoreCase = true)) {
           useThinking = false
@@ -56,7 +71,8 @@ object GeminiClient {
     model: String,
     systemPrompt: String,
     history: List<Turn>,
-    useThinking: Boolean
+    useThinking: Boolean,
+    responseSchema: JSONObject?
   ): String {
     val contents = JSONArray()
     history.forEach { t ->
@@ -69,6 +85,10 @@ object GeminiClient {
     val generationConfig = JSONObject()
     if (useThinking) {
       generationConfig.put("thinkingConfig", JSONObject().put("thinkingLevel", "low"))
+    }
+    if (responseSchema != null) {
+      generationConfig.put("responseMimeType", "application/json")
+      generationConfig.put("responseSchema", responseSchema)
     }
     val body = JSONObject()
       .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt))))

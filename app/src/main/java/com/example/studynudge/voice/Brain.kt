@@ -34,17 +34,19 @@ object Brain {
     val relay = RelayPrefs(ctx)
     if (relay.isConfigured()) {
       try {
-        return RelayClient.ask(
+        val raw = RelayClient.ask(
           relay.dbUrl, relay.secret, relayPrompt(), flatten(history),
-          timeoutMs = 25_000L, maxTokens = 220
+          timeoutMs = 25_000L, maxTokens = 220, schema = ActionJson.SCHEMA_JSON
         )
+        return ActionJson.toLegacy(raw)
       } catch (e: Exception) {
         if (apiKey.isBlank()) throw GeminiClient.GeminiException("パソコンのAIに繋がりませんでした: ${e.message}")
         // 繋がらなかったので、Geminiにフォールバックする
       }
     }
     if (apiKey.isBlank()) throw GeminiClient.GeminiException(missingMessage())
-    return GeminiClient.ask(apiKey, model, cloudPrompt(), history)
+    val raw = GeminiClient.ask(apiKey, model, cloudPrompt(), history, ActionJson.geminiSchema())
+    return ActionJson.toLegacy(raw)
   }
 
   /**
