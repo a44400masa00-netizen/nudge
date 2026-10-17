@@ -3,6 +3,7 @@ package com.example.studynudge.voice
 import android.content.Context
 import org.json.JSONObject
 import java.text.Normalizer
+import java.util.Calendar
 
 /**
  * 定型の操作（タイマー・アラーム・ライト・音量・音楽・アプリ起動など）を、AIを通さず、
@@ -97,7 +98,7 @@ object LocalIntents {
   }
 
   private val RE_CLOCK_COLON = Regex("""(\d{1,2}):(\d{2})""")
-  private val RE_CLOCK_JI = Regex("""(\d{1,2})時(半|(\d{1,2})分)?""")
+  private val RE_CLOCK_JI = Regex("""(\d{1,2})時(?!間)(半|(\d{1,2})分)?""")
   private val RE_NIGHT = Regex("""(夜中|深夜|未明)""")
   private val RE_AM = Regex("""(午前|朝|早朝|明朝)""")
   private val RE_PM = Regex("""(午後|夕方|夜|今夜|晩|昼)""")
@@ -131,6 +132,179 @@ object LocalIntents {
     if (h == 24) h = 0
     if (h > 23 || min > 59) return null
     return Pair(h, min)
+  }
+
+  // ---- カレンダーの予定 ----------------------------------------------------------------
+  // 「明日の15時から歯医者の予定を入れて」→ 日付・時刻・長さ・題名。
+  // 日付の計算（明日は何月何日か）は、AIにやらせると間違えるので、ここで確実に行う。
+
+  private val WD = mapOf('月' to 1, '火' to 2, '水' to 3, '木' to 4, '金' to 5, '土' to 6, '日' to 7)
+
+  private fun sod(c: Calendar): Calendar {
+    val x = c.clone() as Calendar
+    x.set(Calendar.HOUR_OF_DAY, 0)
+    x.set(Calendar.MINUTE, 0)
+    x.set(Calendar.SECOND, 0)
+    x.set(Calendar.MILLISECOND, 0)
+    return x
+  }
+
+  private fun plusDays(c: Calendar, n: Int): Calendar {
+    val x = sod(c)
+    x.add(Calendar.DAY_OF_MONTH, n)
+    return x
+  }
+
+  /** 月曜=1 … 日曜=7 */
+  private fun dow1(c: Calendar): Int {
+    val d = c.get(Calendar.DAY_OF_WEEK)
+    return if (d == Calendar.SUNDAY) 7 else d - 1
+  }
+
+  private fun ymd(year: Int, month0: Int, day: Int): Calendar {
+    val x = Calendar.getInstance()
+    x.clear()
+    x.set(year, month0, day, 0, 0, 0)
+    return x
+  }
+
+  /** bare = true は「金曜」のように、週の指定がないもの */
+  private class DateHit(val date: Calendar, val bare: Boolean)
+
+  private val RE_MD = Regex("""(\d{1,2})月(\d{1,2})日""")
+  private val RE_NEXTM = Regex("""(来月|再来月)の?(\d{1,2})日""")
+  private val RE_ASATTE = Regex("""(明後日|あさって)""")
+  private val RE_ASHITA = Regex("""(明日|あした|あす)""")
+  private val RE_KYOU = Regex("""(今日|きょう|本日)""")
+  private val RE_DAYS_LATER = Regex("""(\d{1,2})日後""")
+  private val RE_WEEKDAY_REL = Regex("""(再来週|来週|今週)の?([月火水木金土日])曜日?""")
+  private val RE_WEEKDAY = Regex("""([月火水木金土日])曜日?""")
+  private val RE_DAY_ONLY = Regex("""(\d{1,2})日(?!後|間)""")
+
+  private fun parseDateWord(t: String, now: Calendar): DateHit? {
+    val today = sod(now)
+    val year = today.get(Calendar.YEAR)
+    var m = RE_MD.find(t)
+    if (m != null) {
+      val mo = m.groupValues[1].toInt() - 1
+      val da = m.groupValues[2].toInt()
+      var d = ymd(year, mo, da)
+      if (d.before(today)) d = ymd(year + 1, mo, da)
+      return DateHit(d, false)
+    }
+    m = RE_NEXTM.find(t)
+    if (m != null) {
+      val add = if (m.groupValues[1] == "来月") 1 else 2
+      return DateHit(ymd(year, today.get(Calendar.MONTH) + add, m.groupValues[2].toInt()), false)
+    }
+    if (t.contains("明々後日")) return DateHit(plusDays(today, 3), false)
+    if (RE_ASATTE.containsMatchIn(t)) return DateHit(plusDays(today, 2), false)
+    if (RE_ASHITA.containsMatchIn(t)) return DateHit(plusDays(today, 1), false)
+    if (RE_KYOU.containsMatchIn(t)) return DateHit(today, false)
+    m = RE_DAYS_LATER.find(t)
+    if (m != null) return DateHit(plusDays(today, m.groupValues[1].toInt()), false)
+    m = RE_WEEKDAY_REL.find(t)
+    if (m != null) {
+      val wk = when (m.groupValues[1]) { "今週" -> 0; "来週" -> 1; else -> 2 }
+      val mon = plusDays(today, -(dow1(today) - 1))
+      var d = plusDays(mon, wk * 7 + (WD.getValue(m.groupValues[2][0]) - 1))
+      if (d.before(today)) d = plusDays(d, 7) // 今週の、すでに過ぎた曜日は、来週にする
+      return DateHit(d, false)
+    }
+    m = RE_WEEKDAY.find(t)
+    if (m != null) {
+      val diff = (WD.getValue(m.groupValues[1][0]) - dow1(today) + 7) % 7
+      return DateHit(plusDays(today, diff), diff == 0)
+    }
+    m = RE_DAY_ONLY.find(t)
+    if (m != null) {
+      val dd = m.groupValues[1].toInt()
+      var d = ymd(year, today.get(Calendar.MONTH), dd)
+      if (d.before(today)) d = ymd(year, today.get(Calendar.MONTH) + 1, dd)
+      return DateHit(d, false)
+    }
+    return null
+  }
+
+  private val RE_CAL_WORD = Regex("""(予定|スケジュール|カレンダー|アポ|予約)""")
+  private val RE_CAL_VERB = Regex("""(入れて|いれて|入れとい|追加|登録|作って|つくって|書いて|メモ|ブロック|セット)""")
+  private val RE_CLOCK_TOK = Regex("""(午前|午後|朝|昼|夕方|夜中|夜|今夜|深夜|早朝)?の?(\d{1,2}:\d{2}|\d{1,2}時(?!間)(半|\d{1,2}分)?)(から|に|まで|ごろ|頃)?""")
+  private val RE_T1 = Regex("""(明々後日|明後日|あさって|明日|あした|あす|今日|きょう|本日)(の)?""")
+  private val RE_T2 = Regex("""(再来週|来週|今週)(の)?[月火水木金土日]曜日?(の)?""")
+  private val RE_T3 = Regex("""[月火水木金土日]曜日?(の)?""")
+  private val RE_T4 = Regex("""(再来月|来月)(の)?\d{1,2}日(の)?""")
+  private val RE_T5 = Regex("""\d{1,2}月\d{1,2}日(の)?""")
+  private val RE_T6 = Regex("""\d{1,2}日後(の)?""")
+  private val RE_T7 = Regex("""\d{1,2}日(?!後|間)(の)?""")
+  private val RE_T8 = Regex("""\d+時間半?(の)?""")
+  private val RE_T9 = Regex("""\d+分間?(の)?""")
+  private val RE_T10 = Regex("""カレンダー(に|へ)?""")
+  private val RE_TITLE_TAIL = Regex("""(の)?(予定|スケジュール|予約|アポ)?(を)?(入れて|いれて|入れといて|追加して|追加|登録して|登録|作って|つくって|書いて|メモして|ブロックして|セットして)(ください|くれる|お願い|ね|よ)*${'$'}""")
+  private val RE_TITLE_LEAD = Regex("""^(の|に|で|と|は)+""")
+  private val RE_TITLE_TRAIL = Regex("""(の|に|を|は)+${'$'}""")
+  private val RE_TITLE_ONLY = Regex("""^(予定|スケジュール|予約|アポ)${'$'}""")
+
+  private fun parseCalendar(o: String, t: String, now: Calendar): Parsed? {
+    if (!RE_CAL_WORD.containsMatchIn(t)) return null
+    if (!RE_CAL_VERB.containsMatchIn(t)) return null
+    if (RE_CLOCK_WORD.containsMatchIn(t)) return null
+    val dh = parseDateWord(t, now) ?: return null
+    val c = parseClock(t) ?: return null
+    var date = dh.date
+    if (dh.bare && date.timeInMillis == sod(now).timeInMillis &&
+      c.first * 60 + c.second <= now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
+    ) {
+      date = plusDays(date, 7) // 「月曜」と言って、今日がその月曜で、時刻がもう過ぎていたら、来週
+    }
+    // 長さ: 「15時から17時まで」または「2時間」など。なければ1時間
+    var dur = 60
+    val clocks = RE_CLOCK_JI.findAll(t).toList()
+    if (clocks.size >= 2 && t.contains("まで")) {
+      val e = clocks[1]
+      var h2 = e.groupValues[1].toInt()
+      val m2 = when {
+        e.groupValues[2] == "半" -> 30
+        e.groupValues[3].isNotEmpty() -> e.groupValues[3].toInt()
+        else -> 0
+      }
+      if (h2 < c.first && h2 < 12) h2 += 12
+      val diff = h2 * 60 + m2 - (c.first * 60 + c.second)
+      if (diff > 0) dur = diff
+    } else {
+      val rest = RE_CLOCK_JI.replace(RE_CLOCK_COLON.replace(t, ""), "")
+      val ds = durationSeconds(rest)
+      if (ds >= 300) dur = Math.round(ds / 60.0).toInt()
+    }
+    dur = minOf(maxOf(dur, 5), 1440)
+    // 題名: 日付・時刻・長さ・「予定を入れて」を取り除いた残り
+    var ti = o
+    ti = RE_T1.replace(ti, "")
+    ti = RE_T2.replace(ti, "")
+    ti = RE_T3.replace(ti, "")
+    ti = RE_T4.replace(ti, "")
+    ti = RE_T5.replace(ti, "")
+    ti = RE_T6.replace(ti, "")
+    ti = RE_T7.replace(ti, "")
+    ti = RE_CLOCK_TOK.replace(ti, "")
+    ti = RE_T8.replace(ti, "")
+    ti = RE_T9.replace(ti, "")
+    ti = RE_T10.replace(ti, "").trim()
+    ti = RE_TITLE_TAIL.replace(ti, "")
+    ti = RE_TITLE_LEAD.replace(ti, "")
+    ti = RE_TITLE_TRAIL.replace(ti, "").trim()
+    if (ti.isEmpty() || RE_TITLE_ONLY.matches(ti)) ti = "予定"
+    if (ti.length > 40) ti = ti.substring(0, 40)
+    val month = date.get(Calendar.MONTH) + 1
+    val day = date.get(Calendar.DAY_OF_MONTH)
+    val mm = if (c.second > 0) "${c.second}分" else ""
+    return Parsed(
+      "add_calendar_event",
+      mapOf(
+        "title" to ti, "year" to date.get(Calendar.YEAR), "month" to month, "day" to day,
+        "hour" to c.first, "minute" to c.second, "duration_minutes" to dur
+      ),
+      "${month}月${day}日の${c.first}時${mm}に、「${ti}」の予定を入れますね。"
+    )
   }
 
   private val OPEN_VERB = Regex("""(開いて|開く|出して|見せて|表示して|起動して|立ち上げて)""")
@@ -202,7 +376,7 @@ object LocalIntents {
   private val RE_MEASURE = Regex("""(\d+)(時間|分|秒)(間)?(計って|はかって|測って)""")
 
   /** @return 該当なしなら null */
-  fun parse(raw: String, isApp: (String) -> Boolean): Parsed? {
+  fun parse(raw: String, now: Calendar = Calendar.getInstance(), isApp: (String) -> Boolean): Parsed? {
     val orig = Normalizer.normalize(raw, Normalizer.Form.NFKC).trim()
     if (orig.isEmpty() || orig.length > 60) return null
     val oSp = PUNCT.replace(orig, "") // 空白は残す（曲名などの取り出し用）
@@ -286,6 +460,9 @@ object LocalIntents {
     if (t.contains("消音モード") || t.contains("無音モード")) {
       return r("ringer_mode", mapOf("mode" to "silent"), "消音にしますね。")
     }
+    // 5.5) カレンダーの予定
+    val calHit = parseCalendar(o, t, now)
+    if (calHit != null) return calHit
     // 6) タイマー
     val sec = durationSeconds(t)
     val afterTimer = RE_AFTER.containsMatchIn(t) && RE_AFTER_WORD.containsMatchIn(t)

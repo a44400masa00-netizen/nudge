@@ -154,6 +154,12 @@ object PhoneActions {
     val cal = java.util.Calendar.getInstance()
     cal.set(year, month - 1, day, hour, minute, 0)
     cal.set(java.util.Calendar.MILLISECOND, 0)
+    // AIが年を間違えて、過去の日付になった場合は、今年（それでも過去なら来年）に直す
+    val nowMs = System.currentTimeMillis()
+    if (cal.timeInMillis < nowMs - 24 * 3600_000L) {
+      cal.set(java.util.Calendar.YEAR, java.util.Calendar.getInstance().get(java.util.Calendar.YEAR))
+      if (cal.timeInMillis < nowMs - 24 * 3600_000L) cal.add(java.util.Calendar.YEAR, 1)
+    }
     val startMillis = cal.timeInMillis
     val durationMinutes = args.optInt("duration_minutes", 60).coerceIn(5, 24 * 60)
     val endMillis = startMillis + durationMinutes * 60_000L
@@ -167,9 +173,27 @@ object PhoneActions {
         put(android.provider.CalendarContract.Events.DTSTART, startMillis)
         put(android.provider.CalendarContract.Events.DTEND, endMillis)
         put(android.provider.CalendarContract.Events.EVENT_TIMEZONE, java.util.TimeZone.getDefault().id)
+        put(android.provider.CalendarContract.Events.HAS_ALARM, 1)
       }
       val uri = ctx.contentResolver.insert(android.provider.CalendarContract.Events.CONTENT_URI, values)
-      if (uri != null) ok("カレンダーに「$title」を追加しました。") else fail("カレンダーへの追加に失敗しました。")
+      if (uri != null) {
+        // 予定の10分前に通知する（失敗しても、予定自体は入っているので無視する）
+        try {
+          val eventId = android.content.ContentUris.parseId(uri)
+          val rv = android.content.ContentValues().apply {
+            put(android.provider.CalendarContract.Reminders.EVENT_ID, eventId)
+            put(android.provider.CalendarContract.Reminders.MINUTES, 10)
+            put(android.provider.CalendarContract.Reminders.METHOD, android.provider.CalendarContract.Reminders.METHOD_ALERT)
+          }
+          ctx.contentResolver.insert(android.provider.CalendarContract.Reminders.CONTENT_URI, rv)
+        } catch (e: Exception) {
+        }
+        val m = cal.get(java.util.Calendar.MONTH) + 1
+        val d = cal.get(java.util.Calendar.DAY_OF_MONTH)
+        ok("カレンダーに「$title」を、${m}月${d}日の${hour}時に追加しました。")
+      } else {
+        fail("カレンダーへの追加に失敗しました。")
+      }
     } catch (e: Exception) {
       fail("カレンダーへの追加に失敗しました。")
     }

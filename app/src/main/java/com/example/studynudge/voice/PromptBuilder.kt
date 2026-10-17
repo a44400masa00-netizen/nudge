@@ -146,7 +146,7 @@ object PromptBuilder {
 - set_timer: seconds（秒数）, label
 - set_alarm: hour, minute（24時間表記）, label
 - show_alarms: 項目なし（止めたい・消したい時。時計アプリの一覧を開くだけ）
-- add_calendar_event: title, year, month, day, hour, minute, duration_minutes（日時は現在日時から計算）
+- add_calendar_event: title, year, month, day, hour, minute, duration_minutes（年は現在日時の年をそのまま使う。「明日」は現在日時の日付に1日足す）
 - compose_email: to, subject, body（作成画面を開くだけ）
 - open_google_home: 項目なし
 - flashlight: on（true か false）
